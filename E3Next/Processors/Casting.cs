@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -1144,6 +1145,10 @@ namespace E3Core.Processors
                 //bug with thiefs eyes, always return true
                 if (spell.SpellID == 8001) return true;
 
+                if (MQ.Query<Int32>($"${{Me.CombatAbilityTimer[{spell.CastName}]}}")==0)
+                {
+                    return true;
+                }
                 if (MQ.Query<bool>($"${{Me.CombatAbilityReady[{spell.CastName}]}}"))
                 {
                     return true;
@@ -1290,8 +1295,7 @@ namespace E3Core.Processors
         }
         public static bool TrueTarget(Int32 targetID, bool allowClear = false)
         {
-
-            //0 means don't change target
+             //0 means don't change target
             if (allowClear && targetID == 0)
             {
                 MQ.Cmd("/nomodkey /keypress esc");

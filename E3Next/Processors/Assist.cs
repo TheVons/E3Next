@@ -500,6 +500,7 @@ namespace E3Core.Processors
                 AssistTargetID = mobID;
                 if (MQ.Query<Int32>("${Target.ID}") != AssistTargetID)
                 {
+                    MQ.Write("AssistOn Fix TargetID:" + AssistTargetID);
                     if (!Casting.TrueTarget(AssistTargetID))
                     {
                         //could not target
@@ -674,13 +675,14 @@ namespace E3Core.Processors
                    }
                    if(!ignoreme)
                    {
-                       if (e3util.FilterMe(x)) return;
-
-                       if (targetID != AssistTargetID)
+                       if (!e3util.FilterMe(x))
                        {
-                           AssistOff();
-                           AllowControl = true;
-                           AssistOn(targetID, Zoning.CurrentZone.Id);
+                           if (targetID != AssistTargetID)
+                           {
+                               AssistOff();
+                               AllowControl = true;
+                               AssistOn(targetID, Zoning.CurrentZone.Id);
+                           }
                        }
                    }
                    else
@@ -690,9 +692,10 @@ namespace E3Core.Processors
                        {
                            MQ.Cmd($"/pet attack {targetID}");
                        }
-                   }
+                    }
                    E3.Bots.BroadcastCommandToGroup($"/assistme {targetID} {Zoning.CurrentZone.Id}", x);
-              
+
+
                }
                else if (!e3util.FilterMe(x))
                {
