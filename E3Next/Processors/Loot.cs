@@ -181,8 +181,8 @@ namespace E3Core.Processors
             if (!E3.CharacterSettings.Misc_AutoLootEnabled) return;
             if(!Assist.IsAssisting)
             {
-
-                if (!Basics.InCombat() || E3.GeneralSettings.Loot_LootInCombat)
+                long currentTimestamp = Core.StopWatch.ElapsedMilliseconds;
+                if ((!Basics.InCombat() && currentTimestamp - Assist.LastAssistEndedTimestamp > E3.GeneralSettings.Loot_TimeToWaitAfterAssist) || E3.GeneralSettings.Loot_LootInCombat)
                 {
                     LootArea();
                 }
@@ -229,12 +229,13 @@ namespace E3Core.Processors
 
                 foreach (var c in corpses)
                 {
-                    //allow eq time to send the message to us
-                    e3util.YieldToEQ();
+					
+					//allow eq time to send the message to us
+					e3util.YieldToEQ();
                     if (e3util.IsShuttingDown() || E3.IsPaused()) return;
                     EventProcessor.ProcessEventsInQueues("/lootoff");
-                    if (!E3.CharacterSettings.Misc_AutoLootEnabled) return;
-
+					EventProcessor.ProcessEventsInQueues("/assistme");
+					if (!E3.CharacterSettings.Misc_AutoLootEnabled) return;
                     if (!E3.GeneralSettings.Loot_LootInCombat)
                     {
                         if (Basics.InCombat()) return;
@@ -271,9 +272,6 @@ namespace E3Core.Processors
         }
         public static void DestroyCorpse(Spawn corpse)
         {
-            bool importantItem = false;
-            bool nodropImportantItem = false;
-
             MQ.Cmd("/loot");
             MQ.Delay(1000, "${Window[LootWnd].Open}");
             MQ.Delay(100);

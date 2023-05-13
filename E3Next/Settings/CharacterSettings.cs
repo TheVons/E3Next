@@ -132,7 +132,7 @@ namespace E3Core.Settings
 		//manastone
 		public bool Manastone_Enabled = true;
         public bool Manastone_OverrideGeneralSettings = false;
-        public Int32 ManaStone_NumerOfClicksPerLoop = 40;
+        public Int32 ManaStone_NumberOfClicksPerLoop = 40;
         public Int32 ManaStone_NumberOfLoops = 25;
         public Int32 ManaStone_DelayBetweenLoops = 50;
 
@@ -151,7 +151,7 @@ namespace E3Core.Settings
         public List<Spell> HealImportantBots = new List<Spell>();
 
         public List<Spell> HealGroup = new List<Spell>();
-
+        public Int32 HealGroup_NumberOfInjuredMembers = 3;
         public List<Spell> HealAll = new List<Spell>();
         public List<Spell> HealXTarget = new List<Spell>();
         public List<Spell> HealPets = new List<Spell>();
@@ -166,7 +166,7 @@ namespace E3Core.Settings
         public bool AutoPetWeapons = false;
         public bool AutoCanni = false;
         public int MalosTotemSpellGem;
-        public Spell CanniSpell;
+        public List<Spell> CanniSpell = new List<Spell>();
 
         public HashSet<string> WhoToHeal = new HashSet<string>(10, StringComparer.OrdinalIgnoreCase);
         public bool HealAutoNecroOrbs = false;
@@ -250,7 +250,7 @@ namespace E3Core.Settings
             LoadKeyData("Manastone", "Override General Settings (On/Off)", ParsedData, ref Manastone_OverrideGeneralSettings);
             LoadKeyData("Manastone", "Manastone Enabled (On/Off)", ParsedData, ref Manastone_Enabled);
 
-            LoadKeyData("Manastone", "NumerOfClicksPerLoop", ParsedData, ref ManaStone_NumerOfClicksPerLoop);
+            LoadKeyData("Manastone", "NumberOfClicksPerLoop", ParsedData, ref ManaStone_NumberOfClicksPerLoop);
             LoadKeyData("Manastone", "NumberOfLoops", ParsedData, ref ManaStone_NumberOfLoops);
             LoadKeyData("Manastone", "DelayBetweenLoops (in milliseconds)", ParsedData, ref ManaStone_DelayBetweenLoops);
             LoadKeyData("Manastone", "In Combat MinMana", ParsedData, ref ManaStone_InCombatMinMana);
@@ -311,7 +311,7 @@ namespace E3Core.Settings
             if (CharacterClass == Class.Shaman)
             {
                 LoadKeyData("Shaman", "Auto-Canni (On/Off)", ParsedData, ref AutoCanni);
-                LoadKeyData("Shaman", "Canni", ParsedData, out CanniSpell);
+                LoadKeyData("Shaman", "Canni", ParsedData, CanniSpell);
                 LoadKeyData("Shaman", "Malos Totem Spell Gem", ParsedData, ref MalosTotemSpellGem);
             }
 
@@ -393,6 +393,7 @@ namespace E3Core.Settings
             LoadKeyData("Heals", "Heal Over Time Spell", ParsedData, HealOverTime);
             LoadKeyData("Heals", "Group Heal", ParsedData, HealGroup);
             LoadKeyData("Heals", "Pet Heal", ParsedData, HealPets);
+            LoadKeyData("Heals", "Number Of Injured Members For Group Heal", ParsedData, ref HealGroup_NumberOfInjuredMembers);
 
 
             LoadKeyData("Heals", "Tank", ParsedData, HealTankTargets);
@@ -455,7 +456,7 @@ namespace E3Core.Settings
             newFile.Sections.AddSection("Assist Settings");
             section = newFile.Sections.GetSectionData("Assist Settings");
             section.Keys.AddKey("Assist Type (Melee/Ranged/Off)", "Melee");
-            section.Keys.AddKey("Melee Stick Point", "Back");
+            section.Keys.AddKey("Melee Stick Point", "Behind");
             if (((CharacterClass & Class.Tank) == CharacterClass) || CharacterClass== Class.Ranger)
             {
                 section.Keys.AddKey("Taunt(On/Off)", "Off");
@@ -624,6 +625,7 @@ namespace E3Core.Settings
                 section.Keys.AddKey("Who to HoT", "");
                 section.Keys.AddKey("Pet Owner", "");
                 section.Keys.AddKey("Auto Cast Necro Heal Orbs (On/Off)", "On");
+                section.Keys.AddKey("Number Of Injured Members For Group Heal", "3");
             }
 
             if ((CharacterClass & Class.Priest) == CharacterClass || (CharacterClass & Class.Caster) == CharacterClass)
@@ -682,7 +684,7 @@ namespace E3Core.Settings
 
             section.Keys.AddKey("Override General Settings (On/Off)", "Off");
             section.Keys.AddKey("Manastone Enabled (On/Off)","On");
-            section.Keys.AddKey("NumerOfClicksPerLoop", "40");
+            section.Keys.AddKey("NumberOfClicksPerLoop", "40");
             section.Keys.AddKey("NumberOfLoops", "25");
             section.Keys.AddKey("DelayBetweenLoops (in milliseconds)", "50");
             section.Keys.AddKey("In Combat MinMana", "40");

@@ -429,8 +429,8 @@ namespace E3Core.Processors
                         }
                     }
                 }
-                else
-                {
+                else if(x.args.Count==0)
+                {   //let someone else try it out
                     E3.Bots.BroadcastCommandToGroup("/evac me");
                 }
             });
@@ -496,9 +496,6 @@ namespace E3Core.Processors
                 }
                 MQ.Cmd("/disband");
                 MQ.Cmd("/raiddisband");
-                E3.Bots.BroadcastCommand("/raiddisband");
-                E3.Bots.BroadcastCommand("/disband");
-
                 MQ.Delay(1500);
                 if (MQ.Query<int>("${Group}") > 0)
                 {
@@ -507,7 +504,36 @@ namespace E3Core.Processors
 
                 foreach (var member in groupMembers)
                 {
+                    E3.Bots.BroadcastCommandToPerson(member,"/raiddisband");
+                    E3.Bots.BroadcastCommandToPerson(member,"/disband");
+                }
+                
+                MQ.Delay(1500);
+                foreach (var member in groupMembers)
+                {
                     MQ.Cmd($"/invite {member}");
+                }
+            });
+
+            EventProcessor.RegisterCommand("/listgroups", (x) =>
+            {
+                var savedGroups = SavedGroupData.GetData();
+				var server = MQ.Query<string>("${MacroQuest.Server}");
+				foreach (var group in savedGroups)
+                {
+                    var serverAndGroupName = group.Key.Split('_');
+                    var serverName = serverAndGroupName[0];
+                    var groupName = serverAndGroupName[1];
+
+                    if (server != serverName) continue;
+
+                    MQ.Write($"\ap[{groupName}]");
+
+                    var members = group.Value;
+                    foreach (var member in members)
+                    {
+                        MQ.Write($"\ag{member}");
+                    }
                 }
             });
 
@@ -521,7 +547,11 @@ namespace E3Core.Processors
                 {
                     Process.Start(new ProcessStartInfo { FileName = "https://www.lazaruseq.com/Wiki/index.php/Main_Page", UseShellExecute = true });
                 }
-            });
+				else if (string.Equals(x.args[0], "Ret", StringComparison.OrdinalIgnoreCase))
+				{
+					Process.Start(new ProcessStartInfo { FileName = "https://retributioneq.com/", UseShellExecute = true });
+				}
+			});
         }
 
         /// <summary>
@@ -641,59 +671,65 @@ namespace E3Core.Processors
                     }
 
                     //don't canni if we are moving/following
-                    if (!(Movement.IsMoving() || Movement.Following))
+                    if (E3.CharacterSettings.AutoCanni && Movement.StandingStillForTimePeriod())
                     {
-                        var canniSpell = E3.CharacterSettings.CanniSpell;
-                        if (canniSpell != null && E3.CharacterSettings.AutoCanni)
+                        foreach(var canniSpell in E3.CharacterSettings.CanniSpell)
                         {
-                            if (Casting.CheckReady(canniSpell))
-                            {
-                                pctHps = MQ.Query<int>("${Me.PctHPs}");
-                                var hpThresholdDefined = canniSpell.MinHP > 0;
-                                var manaThresholdDefined = canniSpell.MaxMana > 0;
-                                bool castCanniSpell = false;
-                                bool hpThresholdMet = false;
-                                bool manaThresholdMet = false;
+							if (Casting.CheckReady(canniSpell))
+							{
+								pctHps = MQ.Query<int>("${Me.PctHPs}");
+								var hpThresholdDefined = canniSpell.MinHP > 0;
+								var manaThresholdDefined = canniSpell.MaxMana > 0;
+								bool castCanniSpell = false;
+								bool hpThresholdMet = false;
+								bool manaThresholdMet = false;
 
-                                if (hpThresholdDefined)
-                                {
-                                    if (pctHps > canniSpell.MinHP)
+								if (hpThresholdDefined)
+								{
+									if (pctHps > canniSpell.MinHP)
+									{
+										hpThresholdMet = true;
+									}
+								}
+
+								if (manaThresholdDefined)
+								{
+									if (pctMana < canniSpell.MaxMana)
+									{
+										manaThresholdMet = true;
+									}
+								}
+
+								if (hpThresholdDefined && manaThresholdDefined)
+								{
+									castCanniSpell = hpThresholdMet && manaThresholdMet;
+								}
+								else if (hpThresholdDefined && !manaThresholdDefined)
+								{
+									castCanniSpell = hpThresholdMet;
+								}
+								else if (manaThresholdDefined && !hpThresholdDefined)
+								{
+									castCanniSpell = manaThresholdMet;
+								}
+								else
+								{
+									castCanniSpell = true;
+								}
+
+								if (castCanniSpell)
+								{
+									var result = Casting.Cast(0, canniSpell);
+								    if(result== CastReturn.CAST_SUCCESS)
                                     {
-                                        hpThresholdMet = true;
+                                        break;
                                     }
                                 }
-
-                                if (manaThresholdDefined)
-                                {
-                                    if (pctMana < canniSpell.MaxMana)
-                                    {
-                                        manaThresholdMet = true;
-                                    }
-                                }
-
-                                if (hpThresholdDefined && manaThresholdDefined)
-                                {
-                                    castCanniSpell = hpThresholdMet && manaThresholdMet;
-                                }
-                                else if (hpThresholdDefined && !manaThresholdDefined)
-                                {
-                                    castCanniSpell = hpThresholdMet;
-                                }
-                                else if (manaThresholdDefined && !hpThresholdDefined)
-                                {
-                                    castCanniSpell = manaThresholdMet;
-                                }
-                                else
-                                {
-                                    castCanniSpell = true;
-                                }
-
-                                if (castCanniSpell)
-                                {
-                                    Casting.Cast(0, canniSpell);
-                                }
-                            }
-                        }
+							}
+							
+						}
+                        
+                        
                     }
                     
                 }
@@ -827,7 +863,7 @@ namespace E3Core.Processors
                     minHP = E3.CharacterSettings.ManaStone_MinHP;
                     maxMana = E3.CharacterSettings.ManaStone_InCombatMaxMana;
                     maxLoop = E3.CharacterSettings.ManaStone_NumberOfLoops;
-                    totalClicksToTry = E3.CharacterSettings.ManaStone_NumerOfClicksPerLoop;
+                    totalClicksToTry = E3.CharacterSettings.ManaStone_NumberOfClicksPerLoop;
                     delayBetweenClicks = E3.CharacterSettings.ManaStone_DelayBetweenLoops;
                     //Int32 minManaToTryAndHeal = 1000;
 
@@ -887,8 +923,15 @@ namespace E3Core.Processors
                         }
                         //allow mq to have the commands sent to the server
                         MQ.Delay(delayBetweenClicks);
-
-                        if (MQ.Query<bool>("${Me.Invis}")) return;
+						if (EventProcessor.CommandList["/followme"].queuedEvents.Count > 0)
+						{
+                            return;
+						}
+						if (EventProcessor.CommandList["/chaseme"].queuedEvents.Count > 0)
+						{
+							return;
+						}
+						if (MQ.Query<bool>("${Me.Invis}")) return;
                         if ((E3.CurrentClass & Class.Priest) == E3.CurrentClass && Basics.InCombat())
                         {
                             if (Heals.SomeoneNeedsHealing(currentMana, pctMana))

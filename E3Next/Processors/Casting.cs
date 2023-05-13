@@ -419,8 +419,12 @@ namespace E3Core.Processors
                             }
 
                             _log.Write("Doing Spell:TargetType based logic checks...");
-                            if (spell.TargetType.Equals("Self"))
-                            {
+                            if (spell.TargetType.Equals("Self") || spell.TargetType.Equals("PB AE"))
+							{
+
+                                //clear our target
+                                TrueTarget(0, true);
+
                                 if (spell.CastType == Data.CastType.Spell)
                                 {
                                     PubServer.AddTopicMessage("${Casting}", $"{spell.CastName} on {targetName}");
@@ -1259,6 +1263,12 @@ namespace E3Core.Processors
 					//lets replace it with TRUE/FALSE
 					tIF = tIF.ReplaceInsensitive("${Assisting}", Assist.IsAssisting.ToString());
 				}
+				//need to do some legacy compatability checksraibles that were used in Ifs.
+				if (tIF.IndexOf("${PBAEON}", 0, StringComparison.OrdinalIgnoreCase) > -1)
+				{
+                    //lets replace it with TRUE/FALSE
+                    tIF = tIF.ReplaceInsensitive("${PBAEON}", Nukes.PBAEEnabled.ToString()) ;
+				}
 				if (tIF.IndexOf("${AssistTarget}", 0, StringComparison.OrdinalIgnoreCase) > -1)
 				{
 					//lets replace it with TRUE/FALSE
@@ -1314,7 +1324,6 @@ namespace E3Core.Processors
             if (allowClear && targetID == 0)
             {
                 MQ.Cmd("/nomodkey /keypress esc");
-                MQ.Delay(200);
                 return true;
             }
             else
