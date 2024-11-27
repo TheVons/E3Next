@@ -1,15 +1,11 @@
-﻿using E3Core.Processors;
-using E3Core.Utility;
+﻿using E3Core.Utility;
 using IniParser;
 using IniParser.Model;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Runtime.Serialization.Formatters;
-using System.Text;
-using System.Threading.Tasks;
-using static System.Collections.Specialized.BitVector32;
+using System.Net;
+
 
 namespace E3Core.Settings
 {
@@ -24,15 +20,20 @@ namespace E3Core.Settings
         public Int32 General_AutoMedBreakPctMana;
         public bool AutoMisfitBox;
         public bool AttackOffOnEnrage;
-        public bool RelayTells;
+        public bool RelayTells=true;
         public string General_NetworkMethod = "EQBC";
         public DefaultBroadcast General_BroadCast_Default = DefaultBroadcast.Group;
         public bool General_HealWhileNavigating = true;
+		public bool General_CureWhileNavigating = true;
         public bool General_BeepNotifications = true;
+        public bool General_LazarusManaRecovery = true;
+
+        public string General_Networking_ExternalIPToQueryForLocal = "8.8.8.8";
+        public string General_Networking_LocalIPOverride = string.Empty;
 
         public Int32 Loot_LootItemDelay = 300;
         public string Loot_LinkChannel = String.Empty;
-        public List<string> Loot_LinkChannelValid = new List<string>() {"g","gu","say","rsay","shout","gsay", "rs"};
+        public List<string> Loot_LinkChannelValid = new List<string>() {"g","gu","say","rsay","shout","gsay", "rs","bc","e3bc"};
         public Int32 MaxGemSlots = 8 + MQ.Query<Int32>("${Me.AltAbility[Mnemonic Retention].Rank}");
 
         private Int32 casting_DefaultSpellGem = 8;
@@ -54,11 +55,13 @@ namespace E3Core.Settings
         public List<string> Loot_OnlyStackableAlwaysLoot = new List<string>();
         public Int32 Loot_OnlyStackableValueGreaterThanInCopper = 1;
         public Boolean Loot_OnlyStackableEnabled = false;
-        public Int32 Loot_TimeToWaitAfterAssist = 2000;
+		public bool Loot_OnlyStackableHonorLootFileSkips = false;
+		public Int32 Loot_TimeToWaitAfterAssist = 2000;
+        
 
         public Boolean Assists_AutoAssistEnabled=false;
         public Int32 Assists_MaxEngagedDistance=250;
-        public Int32 Assists_AEThreatRange=100;
+        public Int32 Assists_AEThreatRange=40;
 
         public bool AutoTrade_WaitForTrade = true;
         public bool AutoTrade_All = false;
@@ -66,10 +69,13 @@ namespace E3Core.Settings
         public bool AutoTrade_Group = false;
         public bool AutoTrade_Guild = false;
         public bool AutoTrade_Raid = false;
+        public List<string> General_E3NetworkAddPathToMonitor = new List<string>();
+        public string DiscordBotToken = string.Empty;
+        public string DiscordGuildChannelId = string.Empty;
+        public string DiscordServerId = string.Empty;
+        public string DiscordMyUserId = string.Empty;
 
-        
-
-        public Int32 Movement_StandingStill = 10000;
+		public Int32 Movement_StandingStill = 10000;
         public Int32 Movement_ChaseDistanceMin = 10;
         public Int32 Movement_ChaseDistanceMax = 500;
         public Int32 Movement_NavStopDistance = 10;
@@ -130,20 +136,43 @@ namespace E3Core.Settings
             //    section.Keys.AddKey("NetworkMethod", "EQBC");
 
             LoadKeyData("General", "NetworkMethod",parsedData, ref General_NetworkMethod);
-            LoadKeyData("General", "Network Default Broadcast (Group,All,AllInZoneOrRaid)", parsedData, ref General_BroadCast_Default);
-
+			LoadKeyData("General", "E3NetworkAddPathToMonitor", parsedData,General_E3NetworkAddPathToMonitor);
+			LoadKeyData("General", "Network Default Broadcast (Group,All,AllInZoneOrRaid)", parsedData, ref General_BroadCast_Default);
             LoadKeyData("General", "Heal While Navigating (On/Off)", parsedData, ref General_HealWhileNavigating);
             LoadKeyData("General", "Beep Notifications (On/Off)", parsedData, ref General_BeepNotifications);
+            LoadKeyData("General", "Cure While Navigating (On/Off)", parsedData, ref General_CureWhileNavigating);
+            LoadKeyData("General", "LazarusManaRecovery (On/Off)", parsedData, ref General_LazarusManaRecovery);
+            LoadKeyData("General", "ExternalIP To Query For Local Address (8.8.8.8 default)", parsedData, ref General_Networking_ExternalIPToQueryForLocal);
+            LoadKeyData("General", "Local IP Override", parsedData, ref General_Networking_LocalIPOverride);
+
+            if (!IPAddress.TryParse(General_Networking_ExternalIPToQueryForLocal,out var result))
+            {
+                General_Networking_ExternalIPToQueryForLocal = "8.8.8.8";
+            }
+
+            if (!IPAddress.TryParse(General_Networking_LocalIPOverride, out var localIpResult))
+            {
+                General_Networking_LocalIPOverride = null;
+            }
+
+
+            LoadKeyData("Discord Bot", "Token", parsedData, ref DiscordBotToken);
+            LoadKeyData("Discord Bot", "Guild Channel ID", parsedData, ref DiscordGuildChannelId);
+            LoadKeyData("Discord Bot", "Server ID", parsedData, ref DiscordServerId);
+            LoadKeyData("Discord Bot", "My Discord User ID", parsedData, ref DiscordMyUserId);
+
 
             LoadKeyData("Misc", "Automatically Use Misfit Box (On/Off)", parsedData, ref AutoMisfitBox);
             LoadKeyData("Misc", "Turn Player Attack Off During Enrage (On/Off)", parsedData, ref AttackOffOnEnrage);
             LoadKeyData("Misc", "Relay Tells (On/Off)", parsedData, ref RelayTells);
 
             LoadKeyData("Loot", "Loot Link Channel", parsedData, ref Loot_LinkChannel);
+            Loot_LinkChannel = Loot_LinkChannel.Trim();
+			Loot_LinkChannel=Loot_LinkChannel.Replace(@"/", "");
             //check valid loot channels
             if (!Loot_LinkChannelValid.Contains(Loot_LinkChannel, StringComparer.OrdinalIgnoreCase))
             {
-                MQ.Write("Invalid Loot Link Channel setting, loot will not be reported");
+                MQ.Write($"Invalid Loot Link Channel setting, loot will not be reported. value [{Loot_LinkChannel}]. Valid values are [{String.Join(",",Loot_LinkChannelValid)}]");
                 Loot_LinkChannel = String.Empty;
             }
           
@@ -164,7 +193,7 @@ namespace E3Core.Settings
             LoadKeyData("Loot", "Loot Only Stackable: Loot all Tradeskill items (On/Off)", parsedData, ref Loot_OnlyStackableAllTradeSkillItems);
             LoadKeyData("Loot", "Loot Only Stackable: Loot common tradeskill items ie:pelts ores silks etc (On/Off)", parsedData, ref Loot_OnlyStackableOnlyCommonTradeSkillItems);
             LoadKeyData("Loot", "Loot Only Stackable: Always Loot Item", parsedData, Loot_OnlyStackableAlwaysLoot);
-            
+            LoadKeyData("Loot", "Loot Only Stackable: Honor Loot File Skip Settings (On/Off)", parsedData, ref Loot_OnlyStackableHonorLootFileSkips);
         
             LoadKeyData("Manastone", "NumerOfClicksPerLoop", parsedData, ref ManaStone_NumerOfClicksPerLoop);
             LoadKeyData("Manastone", "NumberOfLoops", parsedData, ref ManaStone_NumberOfLoops);
@@ -292,12 +321,23 @@ namespace E3Core.Settings
 
             newFile.Sections.AddSection("General");
             var section = newFile.Sections.GetSectionData("General");
-            section.Keys.AddKey("AutoMedBreak PctMana", "0");
+            section.Keys.AddKey("AutoMedBreak PctMana", "70");
             section.Keys.AddKey("NetworkMethod", "EQBC");
-            section.Keys.AddKey("Network Default Broadcast (Group,All,AllInZoneOrRaid)", "Group");
+            section.Keys.AddKey("E3NetworkAddPathToMonitor", "");
+        	section.Keys.AddKey("LazarusManaRecovery (On/Off)", "On");
+			section.Keys.AddKey("ExternalIP To Query For Local Address (8.8.8.8 default)", "8.8.8.8");
+			section.Keys.AddKey("Local IP Override", "");
 
-            section.Keys.AddKey("Heal While Navigating (On/Off)","On");
+			section.Keys.AddKey("Heal While Navigating (On/Off)","On");
+            section.Keys.AddKey("Cure While Navigating (On/Off)", "On");
             section.Keys.AddKey("Beep Notifications (On/Off)", "On");
+
+            newFile.Sections.AddSection("Discord Bot");
+            section = newFile.Sections.GetSectionData("Discord Bot");
+            section.Keys.AddKey("Token", "");
+            section.Keys.AddKey("Guild Channel ID", "");
+            section.Keys.AddKey("Server ID", "");
+            section.Keys.AddKey("My Discord User ID", "");
             
             //Misc
             newFile.Sections.AddSection("Misc");
@@ -317,6 +357,7 @@ namespace E3Core.Settings
             section.Keys.AddKey("Loot Only Stackable: With Value Greater Than Or Equal in Copper", "10000");
             section.Keys.AddKey("Loot Only Stackable: Loot common tradeskill items ie:pelts ores silks etc (On/Off)", "Off");
             section.Keys.AddKey("Loot Only Stackable: Loot all Tradeskill items (On/Off)", "Off");
+            section.Keys.AddKey("Loot Only Stackable: Honor Loot File Skip Settings (On/Off)", "Off");
             section.Keys.AddKey("LootItemDelay", "300");
 
             //Manastone

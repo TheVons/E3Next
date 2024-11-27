@@ -45,7 +45,7 @@ namespace E3Core.Classes
                         if(memberNames.Contains(s.CleanName))
                         {
                             List<Int32> buffList = E3.Bots.BuffList(s.CleanName);
-                            _log.Write($"Bufflist for {s.CleanName}:" + String.Join(",", buffList));
+                            //_log.Write($"Bufflist for {s.CleanName}:" + String.Join(",", buffList));
                             if (!buffList.Contains(CheetahBuffID))
                             {
                                 needToCast = true;
@@ -67,6 +67,10 @@ namespace E3Core.Classes
                         bool haveBardSong = MQ.Query<bool>("${Me.Buff[Selo's Sonata].ID}") || MQ.Query<bool>("${Me.Buff[Selo's Accelerating Chorus].ID}");
                         if (!haveBardSong)
                         {
+                            if (MQ.Query<int>("${Target.ID}") == MQ.Query<int>("${Me.Pet.ID}"))
+                            {
+                                MQ.Cmd("/target clear");
+                            }
 
                             Casting.Cast(E3.CurrentId, _cheetaSpell);
                         }

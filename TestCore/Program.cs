@@ -128,12 +128,12 @@ namespace TestCore
                 throw new NotImplementedException();
             }
 
-            public void Cmd(string query)
+            public void Cmd(string query, bool delayed = false)
             {
                 Console.WriteLine("CMD:"+query);
                //do work
             }
-            public void Cmd(string query,Int32 delay)
+            public void Cmd(string query,Int32 delay, bool delayed = false)
             {
                 Console.WriteLine("CMD:" + query);
                 //do work
@@ -223,7 +223,27 @@ namespace TestCore
             {
                 return true;
             }
-        }
+
+			public string GetFocusedWindowName()
+			{
+                return "NULL";
+			}
+
+			public void WriteDelayed(string query, [CallerMemberName] string memberName = "", [CallerFilePath] string fileName = "", [CallerLineNumber] int lineNumber = 0)
+			{
+				Console.WriteLine($"[{System.DateTime.Now.ToString("HH:mm:ss")}] {query}");
+			}
+
+			public string SpellDataGetLine(string query, int line)
+			{
+				return "NULL";
+			}
+
+			public int SpellDataGetLineCount(string query)
+			{
+				return -1;
+			}
+		}
 
     }
 }

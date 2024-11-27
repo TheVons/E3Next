@@ -19,16 +19,16 @@ namespace E3Core.Processors
         private static Double _stunDelayTimeStamp;
         private static Double _pbaeDelayTimeStamp;
 
-
-        public static bool PBAEEnabled = false;
+		[ExposedData("Nukes", "PBAEEnabled")]
+		public static bool PBAEEnabled = false;
 
         public static void Reset()
         {
             PBAEEnabled = false;
         }
 
-        [SubSystemInit()]
-        public static void Init()
+        [SubSystemInit]
+        public static void Nukes_Init()
         {
             RegisterEvents();
         }
@@ -66,8 +66,8 @@ namespace E3Core.Processors
         }
 
 
-        [ClassInvoke(Data.Class.All)]
-        public static void CheckPBAE()
+		[AdvSettingInvoke]
+		public static void Check_AE()
         {
             if (PBAEEnabled  && E3.CharacterSettings.PBAE.Count>0&& MQ.Query<bool>($"!${{Bool[${{SpawnCount[npc radius {E3.GeneralSettings.Assists_AEThreatRange}]}}]}}"))
             {
@@ -113,8 +113,9 @@ namespace E3Core.Processors
 
                         foreach (var spell in spells)
                         {
-                            //check Ifs on the spell
-                            if (!String.IsNullOrWhiteSpace(spell.Ifs))
+							if (!spell.Enabled) continue;
+							//check Ifs on the spell
+							if (!String.IsNullOrWhiteSpace(spell.Ifs))
                             {
                                 if (!Casting.Ifs(spell))
                                 {
@@ -180,7 +181,7 @@ namespace E3Core.Processors
                                 if (s.Distance < spell.MyRange)
                                 {
 
-                                    CastReturn result = Casting.Cast(Assist.AssistTargetID, spell, Heals.SomeoneNeedsHealing);
+                                    CastReturn result = Casting.Cast(Assist.AssistTargetID, spell);
                                     if (result == CastReturn.CAST_INTERRUPTFORHEAL)
                                     {
                                         return;
@@ -216,8 +217,9 @@ namespace E3Core.Processors
 
                 foreach (var spell in spells)
                 {
-                    //check Ifs on the spell
-                    if (!String.IsNullOrWhiteSpace(spell.Ifs))
+					if (!spell.Enabled) continue;
+					//check Ifs on the spell
+					if (!String.IsNullOrWhiteSpace(spell.Ifs))
                     {
                         if (!Casting.Ifs(spell))
                         {
@@ -258,7 +260,7 @@ namespace E3Core.Processors
                         }
                 
                     
-                        CastReturn result = Casting.Cast(0, spell, Heals.SomeoneNeedsHealing);
+                        CastReturn result = Casting.Cast(0, spell);
                         if (result == CastReturn.CAST_INTERRUPTFORHEAL)
                         {
                             return;

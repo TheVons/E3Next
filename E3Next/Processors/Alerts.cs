@@ -15,12 +15,12 @@ namespace E3Core.Processors
     {
         private static Logging _log = E3.Log;
         private static IMQ MQ = E3.MQ;
-
+	
         /// <summary>
         /// Initializes this instance.
         /// </summary>
         [SubSystemInit]
-        public static void Init()
+        public static void Alerts_Init()
         {
             RegisterEvents();
         }
@@ -43,16 +43,12 @@ namespace E3Core.Processors
                 }
                 else
                 {
-                   
                     if(currentFace!= "Mirrored Mask")
                     {
                         MQ.Cmd("/exchange \"mirrored mask\" face");
-                        MQ.Delay(100);
+                        MQ.Delay(500);
                     }
                 }
-
-
-
                 if (MQ.Query<bool>("${Me.Inventory[face].Name.Equal[Mirrored Mask]}"))
                 {
                     Data.Spell mirroredMask = new Data.Spell("Mirrored Mask");
@@ -113,10 +109,64 @@ namespace E3Core.Processors
                 }
 
             });
-            #endregion
+			#endregion
+			#region Ture_Warning
+			pattern = "roars with fury as it surveys its attackers";
+			EventProcessor.RegisterEvent("Ture_warning", pattern, (x) => {
+				{
 
-            #region Uqua
-            pattern = "The (.+) must unlock the door to the next room\\.";
+					if (E3.CurrentName == MQ.Query<string>("${Raid.Leader}"))
+					{
+						MQ.Cmd($"/rsay AE Rampage INC 5 seconds.");
+					}
+				}
+
+			});
+			#endregion
+
+			#region Ture_Ramp_Start
+			pattern = "eyes roll into its head as it goes into a frenzy";
+			EventProcessor.RegisterEvent("Ture_Ramp_Start", pattern, (x) => {
+				{
+
+					if (E3.CurrentName == MQ.Query<string>("${Raid.Leader}"))
+					{
+						MQ.Cmd($"/rsay -+- 10k AE Rampage Started -+-");
+					}
+				}
+
+			});
+			#endregion
+
+			#region Ture_Ramp_End
+			pattern = "calms and regains its focus";
+			EventProcessor.RegisterEvent("Ture_Ramp_End", pattern, (x) => {
+				{
+
+					if (E3.CurrentName == MQ.Query<string>("${Raid.Leader}"))
+					{
+						MQ.Cmd($"/rsay -+- Boss Safe - AE Rampage ended -+-");
+					}
+				}
+
+			});
+			#endregion
+
+			#region Keldovan_Power
+			pattern = "Keldovan the Harrier regains his combat stance";
+			EventProcessor.RegisterEvent("Keldovan_Power", pattern, (x) => {
+				{
+
+					if (E3.CurrentName == MQ.Query<string>("${Raid.Leader}"))
+					{
+						MQ.Cmd($"/rsay -+- Keldovan has regained a power - KILL A DOG -+-");
+					}
+				}
+
+			});
+			#endregion
+			#region Uqua
+			pattern = "The (.+) must unlock the door to the next room\\.";
             EventProcessor.RegisterEvent("AlertUquaChamberKey", pattern, (x) => {
 
                 if(x.match.Groups.Count>1)
@@ -133,21 +183,121 @@ namespace E3Core.Processors
 
             #endregion
 
-            pattern = @"(.+) spell has been reflected by (.+)\.";
-            EventProcessor.RegisterEvent("ReflectSpell", pattern, (x) => {
+            pattern = $@"(.+) YOU for ([0-9]+) points of damage. \(Rampage\)";
+            EventProcessor.RegisterEvent("RampageDamage", pattern, (x) => {
 
                 if(x.match.Groups.Count>2)
                 {
-                    string mobname = x.match.Groups[1].Value;
-                    string personName = x.match.Groups[2].Value;
-                    if(E3.CurrentName==personName)
-                    {
-                        MQ.Cmd($"/g I have reflected {mobname} spell!");
-                    }
-                }
+					Int32 aggroPct = MQ.Query<Int32>("${Me.PctAggro}");
+					if(aggroPct <100)
+					{
+						string mobname = x.match.Groups[1].Value;
+						string damage = x.match.Groups[2].Value;
+						E3.Bots.Broadcast($"\arRAMPAGE\aw for \ar{damage}\aw damage from \ag{mobname}");
+					}
+				}
             });
+			pattern = @"(.+) spell has been reflected by (.+)\.";
+			EventProcessor.RegisterEvent("ReflectSpell", pattern, (x) => {
+
+				if (x.match.Groups.Count > 2)
+				{
+					string mobname = x.match.Groups[1].Value;
+					string personName = x.match.Groups[2].Value;
+					if (E3.CurrentName == personName)
+					{
+						MQ.Cmd($"/g I have reflected {mobname} spell!");
+					}
+				}
+			});
+			pattern = @"You abandon your preparations to camp\.";
+			EventProcessor.RegisterEvent("PauseForCampUndo", pattern, (x) => {
+
+				
+				if (!Basics.IsPaused) return;
+				Basics.Pause(false);
+			});
+			pattern = @"It will take you about 30 seconds to prepare your camp\.";
+			EventProcessor.RegisterEvent("PauseForCamp30", pattern, (x) => {
+
+				if (!E3.CharacterSettings.CPU_Camping_PauseAt30Seconds)
+				{
+					return;
+				}
+                Basics.Pause(true);
+			});
+			pattern = @"It will take about 20 more seconds to prepare your camp\.";
+			EventProcessor.RegisterEvent("PauseForCamp20", pattern, (x) => {
 
 
-        }
+				if (!E3.CharacterSettings.CPU_Camping_PauseAt20Seconds)
+				{
+					return;
+				}
+                if (Basics.IsPaused) return;
+				Basics.Pause(true);
+			});
+
+			pattern = @"It will take about 5 more seconds to prepare your camp\.";
+			EventProcessor.RegisterEvent("ShutdownForCamp", pattern, (x) => {
+			
+                if(!E3.CharacterSettings.CPU_Camping_ShutdownAt5Seconds)
+                {
+                    return;
+                }
+
+                if (Core._MQ2MonoVersion >= 0.22m)
+				{
+					MQ.Cmd("/shutdown", true);
+				}
+				
+			});
+
+            if(e3util.IsEQLive())
+            {
+				pattern = @"You gain party experience";
+				EventProcessor.RegisterEvent("YouGainEXPParty", pattern, (x) => {
+
+					E3.Bots.Broadcast(x.eventString + $" Total:{MQ.Query<string>("${Me.PctExp}")}%");
+
+				});
+				pattern = @"You gain experience";
+				EventProcessor.RegisterEvent("YouGainEXP", pattern, (x) => {
+
+					E3.Bots.Broadcast(x.eventString + $" Total:{MQ.Query<string>("${Me.PctExp}")}%");
+
+				});
+				pattern = @"(.+) has asked you to join the shared task";
+				EventProcessor.RegisterEvent("GuildAddTask", pattern, (x) => {
+					if (!E3.CharacterSettings.Misc_AutoJoinTasks) return;
+					if (x.match.Groups.Count > 1)
+					{
+						string person = x.match.Groups[1].Value;
+						//need to fill out GuildList.txt for it to work for guild members not in zone.
+						if (e3util.InMyGuild(person))
+						{
+							
+							MQ.Delay(7000);
+							e3util.ClickYesNo(true);
+
+						}
+						else
+						{
+							E3.Bots.Broadcast($@"{person} tried to invite me to a task, but not in my guild or was in guild but not in zone and not in \e3 Macro Inis\guildlist.txt");
+						}
+					}
+				});
+				EventProcessor.RegisterCommand("/e3autojointasks", (x) =>
+				{
+					
+					e3util.ToggleBooleanSetting(ref E3.CharacterSettings.Misc_AutoJoinTasks, "Auto Join Tasks", x.args);
+					
+
+				});
+				
+
+			}
+		}
+		
     }
 }

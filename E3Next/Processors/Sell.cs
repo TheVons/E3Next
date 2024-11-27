@@ -14,7 +14,7 @@ namespace E3Core.Processors
 
 
         [SubSystemInit]
-        public static void Init()
+        public static void Sell_Init()
         {
             RegisterEvents();
         }
@@ -28,9 +28,13 @@ namespace E3Core.Processors
                     E3.Bots.Broadcast("\arNo merchant targeted and no merchant found; exiting autosell");
                     return;
                 }
-
-                AutoSell();
-                MQ.Cmd("/nomodkey /notify MerchantWnd MW_Done_Button leftmouseup");
+                bool destroyOnSell = false;
+                if(x.args.Count>0 && x.args[0] =="destroy")
+                {
+                    destroyOnSell = true;
+                }
+                AutoSell(destroyOnSell);
+                
             });
             EventProcessor.RegisterCommand("/syncinv", (x) =>
             {
@@ -38,7 +42,6 @@ namespace E3Core.Processors
             });
             EventProcessor.RegisterCommand("/autostack", (x) =>
             {
-                e3util.OpenMerchant();
                 AutoStack();
             });
         }
@@ -78,7 +81,7 @@ namespace E3Core.Processors
             LootDataFile.SaveData();
         }
 
-        private static void AutoSell()
+        private static void AutoSell(bool useDestroy = false)
         {
             int platinumGain = MQ.Query<int>("${Me.Platinum}");
             bool merchantWindowOpen = MQ.Query<bool>("${Window[MerchantWnd].Open}");
@@ -140,20 +143,62 @@ namespace E3Core.Processors
                                     E3.Bots.Broadcast($"\arERROR: Selling item. Item:{itemName} Tried to sell but still in inventory. PrimarySlot:{i} bagslot:{e}");
                                 }
                             }
-                        }
+     					}
                     }
                 }
             }
             platinumGain = MQ.Query<int>("${Me.Platinum}") - platinumGain;
             MQ.Write($"\ag You made {platinumGain.ToString("N0")} platinum");
-        }
+			MQ.Cmd("/nomodkey /notify MerchantWnd MW_Done_Button leftmouseup");
+            MQ.Delay(500);
+            if(useDestroy)
+            {
+				//scan through our inventory looking for an item with a stackable
+				for (Int32 i = 1; i <= 10; i++)
+				{
+					bool SlotExists = MQ.Query<bool>($"${{Me.Inventory[pack{i}]}}");
+					if (SlotExists)
+					{
+						Int32 ContainerSlots = MQ.Query<Int32>($"${{Me.Inventory[pack{i}].Container}}");
+
+						if (ContainerSlots > 0)
+						{
+							for (Int32 e = 1; e <= ContainerSlots; e++)
+							{
+								//${Me.Inventory[${itemSlot}].Item[${j}].Name.Equal[${itemName}]}
+								String itemName = MQ.Query<String>($"${{Me.Inventory[pack{i}].Item[{e}]}}");
+								if (itemName == "NULL")
+								{
+									continue;
+								}
+
+								if (LootDataFile.Destroy.Contains(itemName))
+								{
+									MQ.Cmd($"/shiftkey /itemnotify in pack{i} {e} leftmouseup", 500);
+
+									if (e3util.ValidateCursor(MQ.Query<int>($"${{FindItem[={itemName}].ID}}")))
+									{
+										E3.Bots.Broadcast("<AutoSell> Destroying: " + itemName);
+										e3util.CursorTryDestroyItem(itemName);
+										MQ.Delay(300);
+                                       
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			
+		}
 
         private static void AutoStack()
         {
             var windowOpen = MQ.Query<bool>("${Window[BigBankWnd].Open}");
             if (!windowOpen)
             {
-                E3.Bots.Broadcast("\arError: <AutoStack> Merchant window not open. Exiting");
+                E3.Bots.Broadcast("\arError: <AutoStack> Bank window not open. Exiting");
+				return;
             }
 
             for (int i = 1; i <= 10; i++)
@@ -172,11 +217,11 @@ namespace E3Core.Processors
 
                         if (MQ.Query<bool>($"${{FindItemBank[={item}]}}"))
                         {
-                            MQ.Cmd($"/nomodkey /itemnotify \"{item}\" leftmouseup",250);
+                            MQ.Cmd($"/nomodkey /itemnotify \"{item}\" leftmouseup",500);
                             
                             if (MQ.Query<bool>("${Window[QuantityWnd].Open}"))
                             {
-                                MQ.Cmd("/nomodkey /notify QuantityWnd QTYW_Accept_Button leftmouseup",250);
+                                MQ.Cmd("/nomodkey /notify QuantityWnd QTYW_Accept_Button leftmouseup", 500);
                             }
 
                             var slot = MQ.Query<int>($"${{FindItemBank[={item}].ItemSlot}}");
@@ -191,7 +236,7 @@ namespace E3Core.Processors
                                 MQ.Cmd($"/nomodkey /itemnotify bank{slot + 1} leftmouseup");
                             }
 
-                            MQ.Delay(250);
+                            MQ.Delay(500);
                         }
                     }
                 }

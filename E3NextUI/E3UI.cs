@@ -5,20 +5,17 @@ using E3NextUI.Util;
 using Octokit;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Xml;
-using Ionic.Zip;
 using System.Reflection;
+using System.IO;
+
 
 namespace E3NextUI
 {
@@ -27,7 +24,13 @@ namespace E3NextUI
 
     public partial class E3UI : Form
     {
-        public static string Version = "v1.0.41-beta";
+		public const int WM_NCLBUTTONDOWN = 0xA1;
+		public const int HT_CAPTION = 0x2;
+		[DllImportAttribute("user32.dll")]
+		public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+		[DllImportAttribute("user32.dll")]
+		public static extern bool ReleaseCapture();
+		public static string Version = "v1.46";
         public static System.Diagnostics.Stopwatch _stopWatch = new System.Diagnostics.Stopwatch();
         public static volatile bool ShouldProcess = true;
 
@@ -46,9 +49,13 @@ namespace E3NextUI
         public static TextBoxInfo MeleeConsole;
         public static TextBoxInfo SpellConsole;
         public static string PlayerName;
-        public static Int32 _parentProcess;
+        public static string ServerName = string.Empty;
+	
+	    public static Int32 _parentProcess;
         public static object _objectLock = new object();
         public static GeneralSettings _genSettings;
+        public static bool _buttonMode = false;
+        public static bool _textToSpeachMode = false;
         public Image _collapseConsoleImage;
         public Image _uncollapseConsoleImage;
         public Image _collapseDynamicButtonImage;
@@ -56,15 +63,44 @@ namespace E3NextUI
         public static String _playerHP;
         public static String _playerMP;
         public static String _playerSP;
-        
-       
+        private globalKeyboardHook _globalKeyboard;
+        public static string _currentWindowName = "NULL";
+        public static object _currentWindowLock = new object();
+        private FormBorderStyle _startingStyle;
+		//resizing stuff for when in buttonmode
+		//https://stackoverflow.com/questions/2575216/how-to-move-and-resize-a-form-without-a-border
+		private const int
+	    HTLEFT = 10,
+	    HTRIGHT = 11,
+	    HTTOP = 12,
+	    HTTOPLEFT = 13,
+	    HTTOPRIGHT = 14,
+	    HTBOTTOM = 15,
+	    HTBOTTOMLEFT = 16,
+	    HTBOTTOMRIGHT = 17;
+		const int _ = 10; // you can rename this variable if you like
 
-        public E3UI()
+		new Rectangle Top { get { return new Rectangle(0, 0, this.ClientSize.Width, _); } }
+		new Rectangle Left { get { return new Rectangle(0, 0, _, this.ClientSize.Height); } }
+		new Rectangle Bottom { get { return new Rectangle(0, this.ClientSize.Height - _, this.ClientSize.Width, _); } }
+		new Rectangle Right { get { return new Rectangle(this.ClientSize.Width - _, 0, _, this.ClientSize.Height); } }
+
+		Rectangle TopLeft { get { return new Rectangle(0, 0, _, _); } }
+		Rectangle TopRight { get { return new Rectangle(this.ClientSize.Width - _, 0, _, _); } }
+		Rectangle BottomLeft { get { return new Rectangle(0, this.ClientSize.Height - _, _, _); } }
+		Rectangle BottomRight { get { return new Rectangle(this.ClientSize.Width - _, this.ClientSize.Height - _, _, _); } }
+
+		//end resizing stuff for buttonmode
+		public E3UI()
         {
             InitializeComponent();
-            _collapseConsoleImage = (Image)pbCollapseConsoleButtons.Image.Clone();
+            _startingStyle = this.FormBorderStyle;
+			SetStyle(ControlStyles.ResizeRedraw, true); // this is to avoid visual artifacts
+
+			_collapseConsoleImage = (Image)pbCollapseConsoleButtons.Image.Clone();
             pbCollapseConsoleButtons.Image.RotateFlip(RotateFlipType.Rotate180FlipNone);
             _uncollapseConsoleImage = (Image)pbCollapseConsoleButtons.Image.Clone();
+
 
 
             _collapseDynamicButtonImage = (Image)pbCollapseDynamicButtons.Image.Clone();
@@ -90,7 +126,8 @@ namespace E3NextUI
                     lock (_tloClient)
                     {
                         PlayerName = _tloClient.RequestData("${Me.CleanName}");
-                        this.Text = $"E3UI ({PlayerName})";
+                        ServerName = _tloClient.RequestData("${MacroQuest.Server}");
+                        this.Text = $"E3UI ({PlayerName})({ServerName})({Version})";
                         labelPlayerName.Text = PlayerName;
                         configFolder = _tloClient.RequestData("${MacroQuest.Path[config]}");
                     }
@@ -103,20 +140,23 @@ namespace E3NextUI
                 _pubServer = new PubServer();
                 _pubServer.Start(port);
                 _parentProcess = Int32.Parse(args[4]);
+				_globalKeyboard = new globalKeyboardHook((uint)_parentProcess);
+				_globalKeyboard.KeyDown += new KeyEventHandler(globalKeyboard_KeyDown);
+				_globalKeyboard.KeyUp += new KeyEventHandler(globalKeyboard_KeyUp);
 
+			}
 
-            }
-
-            _genSettings = new GeneralSettings(configFolder, PlayerName);
+            _genSettings = new GeneralSettings(configFolder, PlayerName,ServerName);
             _genSettings.LoadData();
 
 
-            if(_genSettings.StartLocationX>0 || _genSettings.StartLocationY>0)
+           // if(_genSettings.StartLocationX>0 || _genSettings.StartLocationY>0)
             {
                 this.StartPosition = FormStartPosition.Manual;
                 var point = new Point(_genSettings.StartLocationX, _genSettings.StartLocationY);
+               this.Location = point;
                 var size = new Size(_genSettings.Width, _genSettings.Height);
-                this.DesktopBounds = new Rectangle(point, size);
+                this.DesktopBounds = new System.Drawing.Rectangle(point, size);
           
             }
 
@@ -151,8 +191,28 @@ namespace E3NextUI
 
            
         }
+		protected override void WndProc(ref Message message)
+		{
+			base.WndProc(ref message);
 
-        private delegate void GlobalDelegate();
+			if (message.Msg == 0x84) // WM_NCHITTEST
+			{
+				var cursor = this.PointToClient(Cursor.Position);
+
+				if (TopLeft.Contains(cursor)) message.Result = (IntPtr)HTTOPLEFT;
+				else if (TopRight.Contains(cursor)) message.Result = (IntPtr)HTTOPRIGHT;
+				else if (BottomLeft.Contains(cursor)) message.Result = (IntPtr)HTBOTTOMLEFT;
+				else if (BottomRight.Contains(cursor)) message.Result = (IntPtr)HTBOTTOMRIGHT;
+
+				else if (Top.Contains(cursor)) message.Result = (IntPtr)HTTOP;
+				else if (Left.Contains(cursor)) message.Result = (IntPtr)HTLEFT;
+				else if (Right.Contains(cursor)) message.Result = (IntPtr)HTRIGHT;
+				else if (Bottom.Contains(cursor)) message.Result = (IntPtr)HTBOTTOM;
+			}
+		}
+
+
+		private delegate void GlobalDelegate();
         public void GlobalUIProcess()
         {
             int currentX = this.DesktopBounds.X;
@@ -184,7 +244,7 @@ namespace E3NextUI
             Int32 col = 5;
             for(Int32 i=0;i<(row*col);i++)
             {
-                var b = new Button();
+                var b = new System.Windows.Forms.Button();
                 b.Name = $"dynamicButton_{i + 1}";
                 if(_genSettings.DynamicButtons.TryGetValue(b.Name, out var db))
                 {
@@ -200,11 +260,28 @@ namespace E3NextUI
                 tableLayoutPanelDynamicButtons.Controls.Add(b);
             }
 
+			dyanmicButtonsLoadKeyBoardShortcuts();
+		}
+        void dyanmicButtonsLoadKeyBoardShortcuts()
+        {
+			_globalKeyboard.HookedKeys.Clear();
+			//register the keys
+			foreach (var pair in _genSettings.DynamicButtons)
+			{
 
-        }
+				if (pair.Value.Hotkey == String.Empty) continue;
+				Keys key;
+				Enum.TryParse(pair.Value.Hotkey, out key);
+
+				if (!_globalKeyboard.HookedKeys.Contains(key))
+				{
+					_globalKeyboard.HookedKeys.Add(key);
+				}
+			}
+		}
         void dynamicButtonRightClick(object sender, MouseEventArgs e)
         {
-            var b = sender as Button;
+            var b = sender as System.Windows.Forms.Button;
             if(b!=null)
             {
                 if (e.Button == MouseButtons.Right)
@@ -216,32 +293,126 @@ namespace E3NextUI
                         edit.StartPosition = FormStartPosition.CenterParent;
                         edit.textBoxName.Text = b.Text;
                         edit.textBoxCommands.Text = String.Join("\r\n",db.Commands);
+						edit.checkBoxHotkeyAlt.Checked = db.HotKeyAlt;
+                        edit.checkBoxHotkeyShift.Checked = db.HotKeyShift;
+						edit.checkBoxHotkeyCtrl.Checked = db.HotKeyCtrl;
+                        edit.checkBoxHotkeyEat.Checked = db.HotKeyEat;
 
-                        if (edit.ShowDialog() == DialogResult.OK)
+                        if(!String.IsNullOrWhiteSpace(db.Hotkey))
                         {
-                            db.Name = edit.textBoxName.Text;
-                            string[] lines = edit.textBoxCommands.Text.Split(new string[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+							edit.comboBoxKeyValues.SelectedItem = db.Hotkey;
+						}
+						if (edit.ShowDialog() == DialogResult.OK)
+                        {
+							if (!String.IsNullOrWhiteSpace(edit.textBoxName.Text))
+							{
+								UpdateDyanmicButton(edit, b);
+								_genSettings.SaveData();
 
-                            db.Commands.Clear();
-                            foreach (var line in lines)
-                            {
-                                if(!String.IsNullOrWhiteSpace(line))
-                                {
-                                    db.Commands.Add(line);
-                                }
-                            }
-                         
-                            _genSettings.SaveData();
-                            b.Text = db.Name;
+							}
+							else
+							{
+								_genSettings.DynamicButtons.Remove(b.Name);
+								b.Text = b.Name.Replace("dynamicButton_", "");
 
-                        }
-                    }
+							}
+							dyanmicButtonsLoadKeyBoardShortcuts();
+						}
+					}
                 }
             }
+           
         }
-        void dynamicButtonClick(object sender, EventArgs e)
+		private void globalKeyboard_KeyUp(object sender, KeyEventArgs e)
+		{
+
+
+			Debug.WriteLine("Debug");
+
+		}
+
+		private void globalKeyboard_KeyDown(object sender, KeyEventArgs e)
+		{
+            lock(_currentWindowLock)
+            {
+				//one of the keys we are looking for!
+				if (_currentWindowName.Equals("IMGUI", StringComparison.OrdinalIgnoreCase))
+				{
+					//they are typing in game, do not capture events.
+					return;
+				}
+				if (_currentWindowName.EndsWith("SearchTextEdit", StringComparison.OrdinalIgnoreCase))
+				{
+					//they are typing in game, do not capture events.
+					return;
+				}
+				if (_currentWindowName.EndsWith("Input", StringComparison.OrdinalIgnoreCase))
+				{
+					//they are typing in game, do not capture events.
+					return;
+				}
+				if (_currentWindowName.Equals("CW_ChatInput", StringComparison.OrdinalIgnoreCase))
+				{
+					//they are typing in game, do not capture events.
+					return;
+				}
+				if (_currentWindowName.Equals("QTYW_SliderInput", StringComparison.OrdinalIgnoreCase))
+				{
+					//they are typing in game, do not capture events.
+					return;
+				}
+			}
+			
+			foreach (var pair in _genSettings.DynamicButtons)
+			{
+
+				if (pair.Value.Hotkey == String.Empty) continue;
+				Keys key;
+				Enum.TryParse(pair.Value.Hotkey.ToString(), out key);
+
+				if (key==e.KeyCode)
+				{ 
+                    if(e.Modifiers==Keys.Alt && !pair.Value.HotKeyAlt)
+                    {
+                        continue;
+                    }
+					if (e.Modifiers == Keys.Control && !pair.Value.HotKeyCtrl)
+					{
+						continue;
+					}
+
+					if (e.Modifiers == Keys.Shift && !pair.Value.HotKeyShift)
+					{
+						continue;
+					}
+					if (e.Modifiers == Keys.Shift && !pair.Value.HotKeyShift)
+					{
+						continue;
+					}
+
+					if (pair.Value.HotKeyAlt && e.Modifiers!= Keys.Alt)
+                    {
+                        continue;
+                    }
+					if (pair.Value.HotKeyCtrl && e.Modifiers != Keys.Control)
+					{
+						continue;
+					}
+                    if(pair.Value.HotKeyEat)
+                    {
+						e.Handled = true;
+					}
+					foreach (var command in pair.Value.Commands)
+					{
+						Server.PubServer.PubCommands.Enqueue(command);
+					}
+				}
+			}
+
+		}
+		void dynamicButtonClick(object sender, EventArgs e)
         {
-            var b = sender as Button;
+            var b = sender as System.Windows.Forms.Button;
             if (b != null)
             {
                 if (_genSettings.DynamicButtons.TryGetValue(b.Name, out var db))
@@ -250,7 +421,8 @@ namespace E3NextUI
                     {
                         Server.PubServer.PubCommands.Enqueue(command);
                     }
-                }
+                    SetForground(_parentProcess);
+				}
                 else
                 {
                     //edit the button
@@ -258,23 +430,53 @@ namespace E3NextUI
                     edit.StartPosition = FormStartPosition.CenterParent;
                     if (edit.ShowDialog() == DialogResult.OK)
                     {
-                        DynamicButton tdb = new DynamicButton();
-                        tdb.Name=edit.textBoxName.Text;
-                        string[] lines = edit.textBoxCommands.Text.Split(new string[] { Environment.NewLine },StringSplitOptions.None);
-                        tdb.Commands = new List<string>(lines);
+                        if(!String.IsNullOrWhiteSpace(edit.textBoxName.Text))
+						{
+                            UpdateDyanmicButton(edit,b);
+							_genSettings.SaveData();
+							
 
-                        if(!_genSettings.DynamicButtons.ContainsKey(b.Name))
+						}
+                        else
                         {
-                            _genSettings.DynamicButtons.Add(b.Name, tdb);
-                        }
-                        _genSettings.DynamicButtons[b.Name]= tdb;
-                        _genSettings.SaveData();
-                        b.Text = tdb.Name;
-                        
-                    }
+							_genSettings.DynamicButtons.Remove(b.Name);
+                            b.Text = b.Name.Replace("dynamicButton_", "");
+
+						}
+						dyanmicButtonsLoadKeyBoardShortcuts();
+					}
                 }
             }
         }
+
+        private void UpdateDyanmicButton(DynamicButtonEditor edit, System.Windows.Forms.Button b)
+        {
+			DynamicButton tdb = new DynamicButton();
+			tdb.Name = edit.textBoxName.Text;
+			string[] lines = edit.textBoxCommands.Text.Split(new string[] { Environment.NewLine }, StringSplitOptions.None);
+			tdb.Commands = new List<string>(lines);
+
+			if (!_genSettings.DynamicButtons.ContainsKey(b.Name))
+			{
+				_genSettings.DynamicButtons.Add(b.Name, tdb);
+			}
+			_genSettings.DynamicButtons[b.Name] = tdb;
+
+			tdb.HotKeyAlt = edit.checkBoxHotkeyAlt.Checked;
+            tdb.HotKeyShift = edit.checkBoxHotkeyShift.Checked;
+			tdb.HotKeyCtrl = edit.checkBoxHotkeyCtrl.Checked;
+			tdb.HotKeyEat = edit.checkBoxHotkeyEat.Checked;
+			string text = (string)edit.comboBoxKeyValues.SelectedItem;
+			if (text != "None")
+			{
+				tdb.Hotkey = text;
+			}
+			else
+			{
+				tdb.Hotkey = String.Empty;
+			}
+			b.Text = tdb.Name;
+		}
         private void GlobalTimer()
         {
             while(ShouldProcess)
@@ -310,7 +512,7 @@ namespace E3NextUI
                     Int32 newWidth = BorderWidth + (panelStatusPannel2.Width) + 10;
                     var point = new Point(this.DesktopBounds.X, this.DesktopBounds.Y);
                     var size = new Size(newWidth, this.DesktopBounds.Height);
-                    this.DesktopBounds = new Rectangle(point, size);
+                    this.DesktopBounds = new System.Drawing.Rectangle(point, size);
 
                 }
                 pbCollapseDynamicButtons.Image = (Image)_collapseDynamicButtonImage;
@@ -323,7 +525,7 @@ namespace E3NextUI
                 Int32 newWidth = BorderWidth + (panelStatusPannel2.Width) + tableLayoutPanelDynamicButtons.Width + 10;
                 var point = new Point(this.DesktopBounds.X, this.DesktopBounds.Y);
                 var size = new Size(newWidth, this.DesktopBounds.Height);
-                this.DesktopBounds = new Rectangle(point, size);
+                this.DesktopBounds = new System.Drawing.Rectangle(point, size);
                 tableLayoutPanelDynamicButtons.Visible = true;
                 pbCollapseDynamicButtons.Image = (Image)_uncollapseDynamicButtonImage;
                 _genSettings.DynamicButtonsCollapsed = false;
@@ -377,7 +579,8 @@ namespace E3NextUI
                 Themese.DarkMode.ChangeTheme(this, this.Controls);
             }
 
-        }
+
+		}
         private void E3UI_FormClosing(object sender, FormClosingEventArgs e)
         {
             //set the variable that will stop all the while loops
@@ -415,10 +618,18 @@ namespace E3NextUI
             while (ShouldProcess)
             {
              
-                if(this.IsHandleCreated)
+                try
                 {
-                    this.Invoke(new ProcesssBaseParseDelegate(ProcesssBaseParse), null);
+					if (this.IsHandleCreated)
+					{
+						this.Invoke(new ProcesssBaseParseDelegate(ProcesssBaseParse), null);
 
+					}
+
+				}
+				catch (Exception ex) 
+                {
+                    ; Debug.WriteLine(ex.Message);                
                 }
                 System.Threading.Thread.Sleep(500);
             }
@@ -450,16 +661,23 @@ namespace E3NextUI
                 {
                     labelPetNameValue.Text = LineParser.PetName;
                 }
-                Int64 yourDamageTotal = LineParser.YourDamage.Sum();
+				if (!String.IsNullOrWhiteSpace(LineParser.MercName))
+				{
+					labelMercNameValue.Text = LineParser.MercName;
+				}
+				Int64 yourDamageTotal = LineParser.YourDamage.Sum();
                 labelYourDamageValue.Text = yourDamageTotal.ToString("N0");
 
                 Int64 petDamageTotal = LineParser.YourPetDamage.Sum();
                 labelPetDamageValue.Text = petDamageTotal.ToString("N0");
 
-                Int64 dsDamage = LineParser.YourDamageShieldDamage.Sum();
+				Int64 mercDamageTotal = LineParser.YourMercDamage.Sum();
+				labelMercDamageValue.Text = mercDamageTotal.ToString("N0");
+
+				Int64 dsDamage = LineParser.YourDamageShieldDamage.Sum();
                 labelYourDamageShieldValue.Text = dsDamage.ToString("N0");
 
-                Int64 totalDamage = yourDamageTotal + petDamageTotal + dsDamage;
+                Int64 totalDamage = yourDamageTotal + petDamageTotal + dsDamage + mercDamageTotal;
                 labelTotalDamageValue.Text = totalDamage.ToString("N0");
 
                 Int64 damageToyou = LineParser.DamageToYou.Sum();
@@ -498,7 +716,18 @@ namespace E3NextUI
                         endTime = LineParser.YourPetDamageTime[LineParser.YourPetDamageTime.Count - 1];
                     }
                 }
-                if (LineParser.YourDamageShieldDamage.Count > 0)
+				if (LineParser.YourMercDamage.Count > 0)
+				{
+					if (startTime > LineParser.YourMercDamage[0] || startTime == 0)
+					{
+						startTime = LineParser.YourMercDamageTime[0];
+					}
+					if (endTime < LineParser.YourMercDamageTime[LineParser.YourMercDamageTime.Count - 1])
+					{
+						endTime = LineParser.YourMercDamageTime[LineParser.YourMercDamageTime.Count - 1];
+					}
+				}
+				if (LineParser.YourDamageShieldDamage.Count > 0)
                 {
                     if (startTime > LineParser.YourDamageShieldDamageTime[0] || startTime == 0)
                     {
@@ -517,14 +746,16 @@ namespace E3NextUI
                 Int64 totalDPS = totalDamage / totalTime;
                 Int64 yourDPS = yourDamageTotal / totalTime;
                 Int64 petDPS = petDamageTotal / totalTime;
+                Int64 mercDPS = mercDamageTotal / totalTime;
                 Int64 dsDPS = dsDamage / totalTime;
 
                 labelTotalDamageDPSValue.Text = totalDPS.ToString("N0") + " dps";
                 labelYourDamageDPSValue.Text = yourDPS.ToString("N0") + " dps";
                 labelPetDamageDPSValue.Text = petDPS.ToString("N0") + " dps";
                 labelDamageShieldDPSValue.Text = dsDPS.ToString("N0") + " dps";
+                labelMercDamageDPSValue.Text = mercDPS.ToString("N0") + " dps";
 
-            }
+			}
             
         }
         private delegate void SetPlayerDataDelegate(string name);
@@ -534,20 +765,44 @@ namespace E3NextUI
         }
         public void SetPlayerHP(string value)
         {
-            _playerHP = value;
+            if(Int32.TryParse(value,out var result))
+            {
+                _playerHP = result.ToString("N0");
+            }
+            else
+            {
+				_playerHP = value;
+			}
+            
         }
         public void SetPlayerMP(string value)
         {
-            _playerMP = value;
+			if (Int32.TryParse(value, out var result))
+			{
+				_playerMP = result.ToString("N0");
+			}
+			else
+			{
+				_playerMP = value;
+			}
+		
 
         }
         public void SetPlayerSP(string value)
         {
-            _playerSP = value;
+			if (Int32.TryParse(value, out var result))
+			{
+				_playerSP = result.ToString("N0");
+			}
+			else
+			{
+				_playerSP = value;
+			}
+		
         }
         public void SetPlayerCasting(string value)
         {
-            if (value == labelStaminaValue.Text) return;
+            if (value == labelCastingValue.Text) return;
             if (this.InvokeRequired)
             {
                 this.Invoke(new SetPlayerDataDelegate(SetPlayerCasting), new object[] { value });
@@ -557,10 +812,18 @@ namespace E3NextUI
                 labelCastingValue.Text = value;
             }
         }
-        #endregion
+		public void SetCurrentWindow(string value)
+		{
+			if (value == _currentWindowName) return;
+            lock(_currentWindowLock)
+            {
+				_currentWindowName = value;
+			}
+		}
+		#endregion
 
-        #region Consoles
-        private void pbCollapseConsoleButtons_Click(object sender, EventArgs e)
+		#region Consoles
+		private void pbCollapseConsoleButtons_Click(object sender, EventArgs e)
         {
             ToggleConsoles();
         }
@@ -639,7 +902,7 @@ namespace E3NextUI
                     Int32 newHeight = TitlebarHeight + BorderWidth + panelStatusPannel2.Height + panelMain.Height + menuStrip1.Height + 20;
                     var point = new Point(this.DesktopBounds.X, this.DesktopBounds.Y);
                     var size = new Size(this.DesktopBounds.Width, newHeight);
-                    this.DesktopBounds = new Rectangle(point, size);
+                    this.DesktopBounds = new System.Drawing.Rectangle(point, size);
 
                 }
 
@@ -655,7 +918,7 @@ namespace E3NextUI
                 Int32 newHeight = TitlebarHeight + BorderWidth + panelStatusPannel2.Height + panelMain.Height + menuStrip1.Height + 20 + (splitContainer2.Height + splitContainer1.Height);
                 var point = new Point(this.DesktopBounds.X, this.DesktopBounds.Y);
                 var size = new Size(this.DesktopBounds.Width, newHeight);
-                this.DesktopBounds = new Rectangle(point, size);
+                this.DesktopBounds = new System.Drawing.Rectangle(point, size);
                 splitContainer2.Visible = true;
                 splitContainer1.Visible = true;
                 _genSettings.ConsoleCollapsed = false;
@@ -726,13 +989,13 @@ namespace E3NextUI
                 //grab the data and send a command
                 //do this to stop the 'ding' sound
                 e.SuppressKeyPress = true;
-                string value = ((TextBox)sender).Text;
+                string value = ((System.Windows.Forms.TextBox)sender).Text;
                 if (value.StartsWith("/"))
                 {
                     PubServer.PubCommands.Enqueue(value);
 
                 }
-                ((TextBox)sender).Text = String.Empty;
+                ((System.Windows.Forms.TextBox)sender).Text = String.Empty;
             }
 
         }
@@ -750,9 +1013,16 @@ namespace E3NextUI
         {
             return Process.GetProcesses().Any(x => x.Id == id);
         }
+		private void SetForground(int id)
+		{
+			Process p  = Process.GetProcessById(id);
+			if (p!=null)
+            {
+				SetForegroundWindow(p.MainWindowHandle);
+			}
+		}
 
-      
-        public static void SetDoubleBuffered(System.Windows.Forms.Control c)
+		public static void SetDoubleBuffered(System.Windows.Forms.Control c)
         {
             //Taxes: Remote Desktop Connection and painting
             //http://blogs.msdn.com/oldnewthing/archive/2006/01/03/508694.aspx
@@ -769,8 +1039,10 @@ namespace E3NextUI
         }
         [DllImport("shell32.dll", SetLastError = true)]
         static extern void SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string AppID);
+		[DllImport("user32.dll", SetLastError = true)]
+		private static extern bool SetForegroundWindow(IntPtr hwnd);
 
-        private void checkUpdatesToolStripMenuItem_Click(object sender, EventArgs e)
+		private void checkUpdatesToolStripMenuItem_Click(object sender, EventArgs e)
         {
 
             string exePath = Assembly.GetExecutingAssembly().CodeBase.Replace("file:///", "").Replace("/", "\\").Replace(@"\E3NextUI.exe", "");
@@ -861,8 +1133,339 @@ namespace E3NextUI
 
             }
         }
-    }
-    public class TextBoxInfo
+
+        string _prevString = String.Empty;
+		private void buttonModeToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+            if(_buttonMode)
+            {
+                this.Text = _prevString;
+                _buttonMode = false;
+                this.FormBorderStyle = _startingStyle;
+				panelMain.Show();
+				panelStatusPannel2.Show();
+				panelButtons.Location = new Point(736, 24);
+
+			}
+			else
+            {
+                _prevString = this.Text;
+				_buttonMode = true;
+                this.ControlBox = false;
+                this.Text = String.Empty;
+                this.FormBorderStyle= FormBorderStyle.None;
+				panelMain.Hide();
+				panelStatusPannel2.Hide();
+				panelButtons.Location = new Point(0, 24);
+
+			}
+			buttonModeToolStripMenuItem.Checked = _buttonMode;
+		}
+
+		private void textToSpeachToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+
+		}
+
+		private void settingsToolStripMenuItem1_Click(object sender, EventArgs e)
+		{
+
+            using (TTSConfig config = new TTSConfig())
+            {
+				if (config._voices.Count == 0)
+				{
+					//no voices to configure, warn and kickout
+					var mb = new MessageBox();
+					mb.StartPosition = FormStartPosition.CenterParent;
+					mb.Text = "No voices Found";
+					mb.lblMessage.Text = "No voices found on the system, sorry :(";
+					mb.ShowDialog();
+					return;
+				}
+
+				config.StartPosition = FormStartPosition.CenterParent;
+
+				config.checkBox_channel_auction.Checked = _genSettings.TTS_ChannelAuctionEnabled;
+				config.checkBox_channel_gsay.Checked = _genSettings.TTS_ChannelGroupEnabled;
+				config.checkBox_channel_guild.Checked = _genSettings.TTS_ChannelGuildEnabled;
+				config.checkBox_channel_ooc.Checked = _genSettings.TTS_ChannelOOCEnabled;
+				config.checkBox_channel_raid.Checked = _genSettings.TTS_ChannelRaidEnabled;
+				config.checkBox_channel_say.Checked = _genSettings.TTS_ChannelSayEnabled;
+				config.checkBox_channel_tell.Checked = _genSettings.TTS_ChannelTellEnabled;
+				config.checkBox_channel_shout.Checked = _genSettings.TTS_ChannelShoutEnabled;
+				config.checkBox_channel_mobspells.Checked = _genSettings.TTS_ChannelMobSpellsEnabled;
+				config.checkBox_channel_pcspells.Checked = _genSettings.TTS_ChannelPCSpellsEnabled;
+
+				config.checkBox_tts_enabled.Checked = _genSettings.TTS_Enabled;
+				config.checkBox_tts_breifmode.Checked = _genSettings.TTS_BriefMode;
+				config.textBox_tts_regex.Text = _genSettings.TTS_RegEx;
+				config.textBox_tts_regex_exclude.Text = _genSettings.TTS_RegExExclude;
+				config.numericUpDown_tts_wordlimit.Value = _genSettings.TTS_CharacterLimit;
+
+
+				if (!String.IsNullOrWhiteSpace(_genSettings.TTS_Voice))
+				{
+					config.comboBox_tts_voices.SelectedItem = _genSettings.TTS_Voice;
+				}
+
+				config.trackBar_tts_speed.Value = _genSettings.TTS_Speed;
+				config.trackBar_tts_volume.Value = _genSettings.TTS_Volume;
+
+
+				if (config.ShowDialog() == DialogResult.OK)
+				{
+					_genSettings.TTS_ChannelAuctionEnabled = config.checkBox_channel_auction.Checked;
+					_genSettings.TTS_ChannelGroupEnabled = config.checkBox_channel_gsay.Checked;
+					_genSettings.TTS_ChannelGuildEnabled = config.checkBox_channel_guild.Checked;
+					_genSettings.TTS_ChannelOOCEnabled = config.checkBox_channel_ooc.Checked;
+					_genSettings.TTS_ChannelRaidEnabled = config.checkBox_channel_raid.Checked;
+					_genSettings.TTS_ChannelSayEnabled = config.checkBox_channel_say.Checked;
+					_genSettings.TTS_ChannelTellEnabled = config.checkBox_channel_tell.Checked;
+					_genSettings.TTS_ChannelShoutEnabled = config.checkBox_channel_shout.Checked;
+					_genSettings.TTS_ChannelMobSpellsEnabled = config.checkBox_channel_mobspells.Checked;
+					_genSettings.TTS_ChannelPCSpellsEnabled = config.checkBox_channel_pcspells.Checked;
+					_genSettings.TTS_Enabled = config.checkBox_tts_enabled.Checked;
+					_genSettings.TTS_BriefMode = config.checkBox_tts_breifmode.Checked;
+					_genSettings.TTS_RegEx = config.textBox_tts_regex.Text;
+					_genSettings.TTS_RegExExclude = config.textBox_tts_regex_exclude.Text;
+					_genSettings.TTS_Voice = (String)config.comboBox_tts_voices.SelectedItem;
+					_genSettings.TTS_CharacterLimit = (Int32)config.numericUpDown_tts_wordlimit.Value;
+					_genSettings.TTS_Speed = config.trackBar_tts_speed.Value;
+					_genSettings.TTS_Volume = config.trackBar_tts_volume.Value;
+					_genSettings.SaveData();
+				}
+			}
+		}
+
+		private void unlockEvaVoiceToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			var mb = new MessageBox();
+			using (TTSConfig config = new TTSConfig())
+            {
+                if (config._voices.Contains("Microsoft Eva Mobile"))
+                {
+
+                    mb.StartPosition = FormStartPosition.CenterParent;
+                    mb.Text = "Already done!";
+                    mb.lblMessage.Text = "This is already unlocked for you! :)";
+                    mb.buttonOkayOnly.Visible = true;
+                    mb.buttonOK.Visible = false;
+                    mb.buttonCancel.Visible = false;
+                    mb.ShowDialog();
+                    return;
+                }
+            }
+
+            string TTSFolder = @"C:\\Windows\\Speech_OneCore\\Engines\\TTS\\en-US";
+			if (!Directory.Exists(TTSFolder))
+            {
+				//TTS not setup/installed on windows?
+				mb.StartPosition = FormStartPosition.CenterParent;
+				mb.Text = "Sorry you don't have eva avilable :(";
+				mb.lblMessage.Text = $"Sorry cannot find the en-US TTS folder at:{TTSFolder}";
+				mb.buttonOkayOnly.Visible = true;
+				mb.buttonOK.Visible = false;
+				mb.buttonCancel.Visible = false;
+				mb.ShowDialog();
+				return;
+
+			}
+
+            //directory exists, lets check for the eva files.
+            string searchPattern = "M1033Eva*";
+			string[] fileNames = System.IO.Directory.GetFiles(TTSFolder, searchPattern);
+
+
+            if(fileNames.Length==0)
+            {
+				//TTS not setup/installed on windows?
+				mb.StartPosition = FormStartPosition.CenterParent;
+				mb.Text = "Sorry you don't have eva avilable :(";
+				mb.lblMessage.Text = $"Sorry cannot find the eva engine files (M1033Eva*) at:{TTSFolder}";
+				mb.buttonOkayOnly.Visible = true;
+				mb.buttonOK.Visible = false;
+				mb.buttonCancel.Visible = false;
+				mb.ShowDialog();
+				return;
+			}
+
+			mb.StartPosition = FormStartPosition.CenterParent;
+			mb.Text = "Please select a folder";
+			mb.lblMessage.Text = "You will be asked to select a folder. \r\nWe will save a registery file you will need to double click on. Default is in the E3N settings area.";
+			mb.buttonOkayOnly.Visible = true;
+			mb.buttonOK.Visible = false;
+			mb.buttonCancel.Visible = false;
+			mb.ShowDialog();
+
+			mb.StartPosition = FormStartPosition.CenterParent;
+			mb.Text = "Please select a folder";
+			mb.lblMessage.Text = "Note After the reg update it will require a restart to show up.";
+			mb.buttonOkayOnly.Visible = true;
+			mb.buttonOK.Visible = false;
+			mb.buttonCancel.Visible = false;
+			mb.ShowDialog();
+
+			SaveFileDialog sd = new SaveFileDialog();
+            sd.Filter = "Registery|*.reg";
+            sd.Title = "Save Registery File";
+            sd.FileName = "eva_unlock.reg";
+            sd.InitialDirectory = _genSettings.GetFolderPath();
+
+            if (sd.ShowDialog() == DialogResult.OK)
+            {
+                if (!String.IsNullOrEmpty(sd.FileName))
+                {
+                    
+                    //sd filename now has the full path
+                    System.IO.File.WriteAllText(sd.FileName, _evaUnlockString);
+                    Int32 indexOfLastSlash = sd.FileName.LastIndexOf("\\");
+                    string directory = sd.FileName.Substring(0, indexOfLastSlash);
+                    ProcessStartInfo startInfo = new ProcessStartInfo()
+					{
+						Arguments = directory,
+						FileName = "explorer.exe"
+				    };
+
+				    Process.Start(startInfo);
+
+			    }
+            }
+
+		}
+		#region unlockString
+		string _evaUnlockString = @"Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech\Voices\Tokens\MSTTS_V110_enUS_EvaM]
+@=""Microsoft Eva Mobile - English (United States)""
+""409""=""Microsoft Eva Mobile - English (United States)""
+""CLSID""=""{179F3D56-1B0B-42B2-A962-59B7EF59FE1B}""
+""LangDataPath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,\
+  00,70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,\
+  65,00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,\
+  00,5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,53,00,54,00,54,00,53,00,\
+  4c,00,6f,00,63,00,65,00,6e,00,55,00,53,00,2e,00,64,00,61,00,74,00,00,00
+""VoicePath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,00,\
+  70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,65,\
+  00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,00,\
+  5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,31,00,30,00,33,00,33,00,45,\
+  00,76,00,61,00,00,00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech\Voices\Tokens\MSTTS_V110_enUS_EvaM\Attributes]
+""Age""=""Adult""
+""Gender""=""Female""
+""Version""=""11.0""
+""Language""=""409""
+""Name""=""Microsoft Eva Mobile""
+""SharedPronunciation""=""""
+""Vendor""=""Microsoft""
+""DataVersion""=""11.0.2013.1022""
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enUS_EvaM]
+@=""Microsoft Eva Mobile - English (United States)""
+""409""=""Microsoft Eva Mobile - English (United States)""
+""CLSID""=""{179F3D56-1B0B-42B2-A962-59B7EF59FE1B}""
+""LangDataPath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,\
+  00,70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,\
+  65,00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,\
+  00,5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,53,00,54,00,54,00,53,00,\
+  4c,00,6f,00,63,00,65,00,6e,00,55,00,53,00,2e,00,64,00,61,00,74,00,00,00
+""VoicePath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,00,\
+  70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,65,\
+  00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,00,\
+  5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,31,00,30,00,33,00,33,00,45,\
+  00,76,00,61,00,00,00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enUS_EvaM\Attributes]
+""Age""=""Adult""
+""Gender""=""Female""
+""Version""=""11.0""
+""Language""=""409""
+""Name""=""Microsoft Eva Mobile""
+""SharedPronunciation""=""""
+""Vendor""=""Microsoft""
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\SPEECH\Voices\Tokens\MSTTS_V110_enUS_EvaM]
+@=""Microsoft Eva Mobile - English (United States)""
+""409""=""Microsoft Eva Mobile - English (United States)""
+""CLSID""=""{179F3D56-1B0B-42B2-A962-59B7EF59FE1B}""
+""LangDataPath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,\
+  00,70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,\
+  65,00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,\
+  00,5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,53,00,54,00,54,00,53,00,\
+  4c,00,6f,00,63,00,65,00,6e,00,55,00,53,00,2e,00,64,00,61,00,74,00,00,00
+""VoicePath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,00,\
+  70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,65,\
+  00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,00,\
+  5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,31,00,30,00,33,00,33,00,45,\
+  00,76,00,61,00,00,00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\SPEECH\Voices\Tokens\MSTTS_V110_enUS_EvaM\Attributes]
+""Age""=""Adult""
+""Gender""=""Female""
+""Version""=""11.0""
+""Language""=""409""
+""Name""=""Microsoft Eva Mobile""
+""SharedPronunciation""=""""
+""Vendor""=""Microsoft""
+""DataVersion""=""11.0.2013.1022""
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\SPEECH\Voices\Tokens\MSTTS_V110_enUS_EvaM]
+@=""Microsoft Eva Mobile - English (United States)""
+""409""=""Microsoft Eva Mobile - English (United States)""
+""CLSID""=""{179F3D56-1B0B-42B2-A962-59B7EF59FE1B}""
+""LangDataPath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,\
+  00,70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,\
+  65,00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,\
+ 00,5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,53,00,54,00,54,00,53,00,\
+  4c,00,6f,00,63,00,65,00,6e,00,55,00,53,00,2e,00,64,00,61,00,74,00,00,00
+""VoicePath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,00,\
+  70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,65,\
+  00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,00,\
+  5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,31,00,30,00,33,00,33,00,45,\
+  00,76,00,61,00,00,00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\SPEECH\Voices\Tokens\MSTTS_V110_enUS_EvaM\Attributes]
+""Age""=""Adult""
+""Gender""=""Female""
+""Version""=""11.0""
+""Language""=""409""
+""Name""=""Microsoft Eva Mobile""
+""SharedPronunciation""=""""
+""Vendor""=""Microsoft""
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enUS_EvaM]
+@=""Microsoft Eva Mobile - English (United States)""
+""409""=""Microsoft Eva Mobile - English (United States)""
+""CLSID""=""{179F3D56-1B0B-42B2-A962-59B7EF59FE1B}""
+""LangDataPath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,\
+  00,70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,\
+  65,00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,\
+  00,5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,53,00,54,00,54,00,53,00,\
+  4c,00,6f,00,63,00,65,00,6e,00,55,00,53,00,2e,00,64,00,61,00,74,00,00,00
+""VoicePath""=hex(2):25,00,77,00,69,00,6e,00,64,00,69,00,72,00,25,00,5c,00,53,00,\
+  70,00,65,00,65,00,63,00,68,00,5f,00,4f,00,6e,00,65,00,43,00,6f,00,72,00,65,\
+  00,5c,00,45,00,6e,00,67,00,69,00,6e,00,65,00,73,00,5c,00,54,00,54,00,53,00,\
+  5c,00,65,00,6e,00,2d,00,55,00,53,00,5c,00,4d,00,31,00,30,00,33,00,33,00,45,\
+  00,76,00,61,00,00,00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Speech_OneCore\Voices\Tokens\MSTTS_V110_enUS_EvaM\Attributes]
+""Age""=""Adult""
+""Gender""=""Female""
+""Version""=""11.0""
+""Language""=""409""
+""Name""=""Microsoft Eva Mobile""
+""SharedPronunciation""=""""
+""Vendor""=""Microsoft""";
+		#endregion
+
+		private void menuStrip1_MouseDown(object sender, MouseEventArgs e)
+		{
+			ReleaseCapture();
+			SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
+
+		}
+	}
+	public class TextBoxInfo
     {
         public System.Text.StringBuilder sb = new StringBuilder();
         public RichTextBox textBox;
@@ -872,4 +1475,6 @@ namespace E3NextUI
         public CircularBuffer<string> consoleBuffer = new CircularBuffer<string>(1000);
     }
 
+
+  
 }

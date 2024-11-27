@@ -5,6 +5,7 @@ using NetMQ.Sockets;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -55,44 +56,41 @@ namespace E3Core.Server
         }
         public void Process()
         {
-            while(Core.IsProcessing)
-            {
-                //some type of delay if our sub errors out.
-                System.Threading.Thread.Sleep(100);
-                TimeSpan recieveTimeout = new TimeSpan(0, 0, 0, 0, 5);
-                using (var subSocket = new SubscriberSocket())
-                {
-                    try
-                    {
-                        subSocket.Options.ReceiveHighWatermark = 1000;
-                        subSocket.Options.TcpKeepalive = true;
-                        subSocket.Options.TcpKeepaliveIdle = TimeSpan.FromSeconds(5);
-                        subSocket.Options.TcpKeepaliveInterval = TimeSpan.FromSeconds(1);
-                        subSocket.Connect("tcp://127.0.0.1:" + _port);
-                        subSocket.Subscribe("OnCommand");
-                        while (Core.IsProcessing)
-                        {
-                            string messageTopicReceived;
-                            if (subSocket.TryReceiveFrameString(recieveTimeout, out messageTopicReceived))
-                            {
-                                string messageReceived = subSocket.ReceiveFrameString();
-                                if (messageTopicReceived == "OnCommand")
-                                {
-                                    _pubCommands.Enqueue(messageReceived);
-                                }
-                            }
-                            System.Threading.Thread.Sleep(1);
-                        }
-                    }
-                    catch(Exception)
-                    {
+			//need to do this so double parses work in other languages
+			Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US");
 
+			TimeSpan recieveTimeout = new TimeSpan(0, 0, 0, 0, 5);
+            using (var subSocket = new SubscriberSocket())
+            {
+                try
+                {
+                    subSocket.Options.ReceiveHighWatermark = 1000;
+                    subSocket.Options.TcpKeepalive = true;
+                    subSocket.Options.TcpKeepaliveIdle = TimeSpan.FromSeconds(5);
+                    subSocket.Options.TcpKeepaliveInterval = TimeSpan.FromSeconds(1);
+                    subSocket.Connect("tcp://127.0.0.1:" + _port);
+                    subSocket.Subscribe("OnCommand");
+                    while (Core.IsProcessing && E3.NetMQ_PubClientThradRun)
+                    {
+                        string messageTopicReceived;
+                        if (subSocket.TryReceiveFrameString(recieveTimeout, out messageTopicReceived))
+                        {
+                            string messageReceived = subSocket.ReceiveFrameString();
+                            if (messageTopicReceived == "OnCommand")
+                            {
+                                _pubCommands.Enqueue(messageReceived);
+                            }
+                        }
+                           
                     }
-                    
                 }
-               
+                catch(Exception)
+                {
+
+                }
+                    
             }
-            MQ.Write("Shutting down PubClient Thread.");
+            MQ.WriteDelayed("Shutting down PubClient Thread.");
         }
     }
 }

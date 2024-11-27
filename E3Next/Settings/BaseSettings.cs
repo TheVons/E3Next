@@ -27,14 +27,13 @@ namespace E3Core.Settings
         private static string _currentSet = String.Empty;
 
         public static string CurrentSet { get { return _currentSet; } set { _currentSet = value; } }
-
-
-        static BaseSettings()
+		
+		static BaseSettings()
         {
+			
 
 
-
-        }
+		}
         public static string GetBoTFilePath(string fileName)
         {
             string macroFile = _macroFolder + _botFolder + fileName;
@@ -145,6 +144,7 @@ namespace E3Core.Settings
                 }
             }
         }
+
         public static void LoadKeyData(string sectionKey, string Key, IniData parsedData, ref DefaultBroadcast valueToSet)
         {
             _log.Write($"{sectionKey} {Key}");
@@ -164,7 +164,7 @@ namespace E3Core.Settings
                 }
             }
         }
-        public static void LoadKeyData<K, V>(string sectionKey, string Key, IniData parsedData, Dictionary<K, V> dictionary)
+        public static void LoadKeyData<K, V>(string sectionKey, string Key, IniData parsedData, IDictionary<K, V> dictionary)
         {
             _log.Write($"{sectionKey} {Key}");
             var section = parsedData.Sections[sectionKey];
@@ -185,7 +185,50 @@ namespace E3Core.Settings
                 }
             }
         }
-        public static string LoadKeyData(string sectionKey, string Key, IniData parsedData)
+		public static void LoadKeyData<K>(string sectionKey, IniData parsedData, IDictionary<K, Burn> dictionary)
+		{
+			var section = parsedData.Sections[sectionKey];
+			if (section != null)
+			{
+				var keyData = section;
+				if (keyData != null)
+				{
+					foreach (var data in keyData)
+					{
+						Burn tburn = new Burn();
+						tburn.Name = data.KeyName;
+						foreach (var value in data.ValueList)
+						{
+							if (String.IsNullOrWhiteSpace(value)) continue;
+							var newSpell = new Data.Spell(value, parsedData);
+							tburn.ItemsToBurn.Add(newSpell);
+						}
+
+						dictionary.Add((K)(object)data.KeyName, tburn);
+						
+					}
+				}
+			}
+		}
+		public static void LoadKeyData<K>(string sectionKey, IniData parsedData, IDictionary<K, String> dictionary)
+		{
+			
+			var section = parsedData.Sections[sectionKey];
+			if (section != null)
+			{
+                var keyData = section;
+                if (keyData != null)
+				{
+					foreach (var data in keyData)
+					{
+						dictionary.Add((K)(object)data.KeyName, data.Value);
+						
+					}
+				}
+			}
+		}
+		
+		public static string LoadKeyData(string sectionKey, string Key, IniData parsedData)
         {
             _log.Write($"{sectionKey} {Key}");
             var section = parsedData.Sections[sectionKey];
@@ -205,6 +248,34 @@ namespace E3Core.Settings
             }
             return String.Empty;
         }
+		public static SortedDictionary<string, List<Data.Spell>> LoadMeldoySetData(IniData parsedData)
+		{
+			SortedDictionary<string, List<Data.Spell>> returnData = new SortedDictionary<string, List<Data.Spell>>();
+			foreach (var section in parsedData.Sections)
+			{
+				if(section.SectionName.EndsWith(" Melody"))
+				{
+					//its a dynamic melody, lets get the spells 
+					string name = section.SectionName.Split(new char[] { ' ' })[0];
+
+					List<Data.Spell> spellList;
+					if(!returnData.TryGetValue(name,out spellList))
+					{
+						spellList = new List<Data.Spell>();
+						returnData.Add(name, spellList);
+					}
+					foreach(var key in section.Keys)
+					{
+						foreach(var value in key.ValueList)
+						{
+							var newSpell = new Data.Spell(value, parsedData);
+							spellList.Add(newSpell);
+						}
+					}
+				}
+			}
+			return returnData;
+		}
         public static void LoadKeyData(string sectionKey, string Key, IniData parsedData, ref Boolean valueToSet)
         {
             _log.Write($"{sectionKey} {Key}");
@@ -249,9 +320,11 @@ namespace E3Core.Settings
                     {
                         if (!String.IsNullOrWhiteSpace(data))
                         {
-                            valueToSet = Int32.Parse(data);
-
-                        }
+							if(!Int32.TryParse(data,out valueToSet))
+							{
+								MQ.Write($"\arERROR! Invalid Int32 value for [{sectionKey}][{Key}]");
+							}
+	                    }
                     }
                 }
             }
@@ -277,7 +350,31 @@ namespace E3Core.Settings
                 }
             }
         }
-        public static void LoadKeyData(string sectionKey, string Key, IniData parsedData, List<Data.Spell> collectionToAddTo)
+		public static void LoadKeyData(string sectionKey, string Key, IniData parsedData, HashSet<String> collectionToAddTo)
+		{
+			_log.Write($"{sectionKey} {Key}");
+			var section = parsedData.Sections[sectionKey];
+			if (section != null)
+			{
+				var keyData = section.GetKeyData(Key);
+				if (keyData != null)
+				{
+					foreach (var data in keyData.ValueList)
+					{
+						if (!String.IsNullOrWhiteSpace(data))
+						{
+                            if(!collectionToAddTo.Contains(data))
+                            {
+								collectionToAddTo.Add(data);
+
+							}
+						}
+
+					}
+				}
+			}
+		}
+		public static void LoadKeyData(string sectionKey, string Key, IniData parsedData, List<Data.Spell> collectionToAddTo)
         {
             _log.Write($"{sectionKey} {Key}");
             var section = parsedData.Sections[sectionKey];
@@ -290,7 +387,7 @@ namespace E3Core.Settings
                     {
                         if (!String.IsNullOrWhiteSpace(data))
                         {
-                            CheckFor(data, sectionKey);
+                            CheckFor(data, sectionKey,keyData);
                             collectionToAddTo.Add(new Data.Spell(data, parsedData));
                         }
 
@@ -311,7 +408,7 @@ namespace E3Core.Settings
                     {
                         if (!String.IsNullOrWhiteSpace(data))
                         {
-                            CheckFor(data, sectionKey);
+                            CheckFor(data, sectionKey, keyData);
                             collectionToAddTo.Add(new Data.SpellRequest(data, parsedData));
                         }
 
@@ -333,7 +430,7 @@ namespace E3Core.Settings
                         if (!String.IsNullOrWhiteSpace(data))
                         {
 
-                            CheckFor(data, sectionKey);
+                            CheckFor(data, sectionKey, keyData);
 
 
                             collectionToAddTo.Enqueue(new Data.Spell(data, parsedData));
@@ -390,15 +487,21 @@ namespace E3Core.Settings
         /// Checks if i have a thing and broadcasts a warning message that i don't.
         /// </summary>
         /// <param name="thingToCheckFor">The thing.</param>
-        public static void CheckFor(string thingToCheckFor, string sectionkey)
+        public static void CheckFor(string thingToCheckFor, string sectionkey,KeyData keyData)
         {
 
             if (sectionkey.Equals("Cures", StringComparison.OrdinalIgnoreCase)) return;
             if (sectionkey.Equals("Blocked Buffs", StringComparison.OrdinalIgnoreCase)) return;
             if (sectionkey.Equals("Dispel", StringComparison.OrdinalIgnoreCase)) return;
+			if (sectionkey.Equals("Dispel", StringComparison.OrdinalIgnoreCase)) return;
+			if (sectionkey.Equals("Pets", StringComparison.OrdinalIgnoreCase) && keyData.KeyName.Equals("Blocked Pet Buff", StringComparison.OrdinalIgnoreCase)) return;
+			if (sectionkey.Equals("Buffs", StringComparison.OrdinalIgnoreCase) && keyData.KeyName.Equals("Group Buff Request",StringComparison.OrdinalIgnoreCase)) return;
+			if (sectionkey.Equals("Buffs", StringComparison.OrdinalIgnoreCase) && keyData.KeyName.Equals("Raid Buff Request", StringComparison.OrdinalIgnoreCase)) return;
+			if (sectionkey.Equals("Buffs", StringComparison.OrdinalIgnoreCase) && keyData.KeyName.Equals("Stack Buff Request", StringComparison.OrdinalIgnoreCase)) return;
 
+			if (sectionkey.Equals("Charm", StringComparison.OrdinalIgnoreCase)) return;
 
-            string thing = thingToCheckFor;
+			string thing = thingToCheckFor;
             if (thingToCheckFor.Contains('/'))
             {
                 thing = thingToCheckFor.Split('/')[0];
@@ -416,7 +519,13 @@ namespace E3Core.Settings
         {
             if (!string.IsNullOrEmpty(_fileLastModifiedFileName))
             {
-                if (_fileLastModified != System.IO.File.GetLastWriteTime(_fileLastModifiedFileName))
+				var currentLastModified = System.IO.File.GetLastWriteTime(_fileLastModifiedFileName);
+
+				if(System.Diagnostics.Debugger.IsAttached)
+				{ return false;
+				}
+
+				if (_fileLastModified != currentLastModified)
                 {
                     return true;
                 }

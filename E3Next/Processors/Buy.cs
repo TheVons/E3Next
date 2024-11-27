@@ -16,7 +16,7 @@ namespace E3Core.Processors
         private static IMQ MQ = E3.MQ;
         private static ISpawns Spawns = E3.Spawns;
         [SubSystemInit]
-        public static void Init()
+        public static void Buy_Init()
         {
             RegisterEvents();
         }
@@ -60,7 +60,7 @@ namespace E3Core.Processors
                         break;
                 }
                     
-            });
+            },"used to buy food/water/emeralds");
         }
         /// <summary>
         /// Check how many are in a stack of the given item and give back how many of the item you need to make a full stack
@@ -138,6 +138,11 @@ namespace E3Core.Processors
                     //zoneId 386 = Marr temple
                     string vendorName = "Vori";
                     vendorID = MQ.Query<int>($"${{Spawn[{vendorName}].ID}}");
+                }
+
+                if(vendorID==0)
+                {
+                    vendorID = MQ.Query<Int32>("${Target.ID}");
                 }
 
                 if (vendorID > 0)

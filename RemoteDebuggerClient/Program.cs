@@ -2,13 +2,11 @@
 using MonoCore;
 using NetMQ;
 using NetMQ.Sockets;
-using RestSharp;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
+using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,25 +17,31 @@ namespace MQServerClient
         public static Stopwatch _stopWatch = new Stopwatch();
         static void Main(string[] args)
         {
-            AsyncIO.ForceDotNet.Force();
+			//need to do this so double parses work in other languages
+			Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US");
+
+			AsyncIO.ForceDotNet.Force();
+            MonoCore.Core._MQ2MonoVersion = 0.21m;
             MonoCore.Core.mqInstance = new NetMQMQ();
             MonoCore.Core.spawnInstance = new NetMQSpawns();
             MonoCore.Core.OnInit();
-           
+
             NetMQOnIncomingChat _incChat = new NetMQOnIncomingChat();
             _incChat.Start();
 
-            IBots bots = new DanBots();
+            E3.MQ = Core.mqInstance;
+            E3.Log = Core.logInstance;
+            E3.Spawns = Core.spawnInstance;
 
             Core.mqInstance.Cmd("/remotedebugdelay 100");
             E3.Process();
             Core.mqInstance.Cmd("/remotedebugdelay 1");
             while (true)
             {
-                
+                Console.WriteLine($"{DateTime.Now} Start of e3 scan loop");
                 E3.Process();
                 EventProcessor.ProcessEventsInQueues();
-                System.Threading.Thread.Sleep(1000);
+                //System.Threading.Thread.Sleep(1000);
             }
 
         }
@@ -328,7 +332,7 @@ namespace MQServerClient
             Cmd(query);
         }
 
-        public void Cmd(string query)
+        public void Cmd(string query, bool delayed = false)
         {
             //send empty frame over
             if (_requestMsg.IsInitialised)
@@ -374,9 +378,9 @@ namespace MQServerClient
             Console.WriteLine("CMD:" + query);
             //do work
         }
-        public void Cmd(string query, Int32 delay)
+        public void Cmd(string query, Int32 delay, bool delayed = false)
         {
-            Cmd(query);
+            Cmd(query, delayed);
             Delay(delay);
 
         }
@@ -420,7 +424,7 @@ namespace MQServerClient
 
         public T Query<T>(string query)
         {
-            Console.WriteLine(query);
+            // Console.WriteLine(query);
             if (_requestMsg.IsInitialised)
             {
                 _requestMsg.Close();
@@ -783,6 +787,152 @@ namespace MQServerClient
         {
             return true;
         }
-    }
+
+		public string GetFocusedWindowName()
+		{
+            return "NULL";
+		}
+
+		public void WriteDelayed(string query, [CallerMemberName] string memberName = "", [CallerFilePath] string fileName = "", [CallerLineNumber] int lineNumber = 0)
+		{
+			Write(query, memberName, fileName, lineNumber);
+		}
+
+		public string SpellDataGetLine(string query, int line)
+		{
+			if (_requestMsg.IsInitialised)
+			{
+				_requestMsg.Close();
+			}
+			_requestMsg.InitEmpty();
+			//send empty frame
+
+			//create query+parm buffer
+			string pramQuery = query + "," + line;
+
+			_requestSocket.TrySend(ref _requestMsg, SendTimeout, true);
+
+			_payloadLength = System.Text.Encoding.Default.GetBytes(pramQuery, 0, pramQuery.Length, _payload, 0);
+
+			_requestMsg.Close();
+
+			//include command+ length in payload
+			_requestMsg.InitPool(_payloadLength + 8);
+
+
+
+			unsafe
+			{
+				fixed (byte* src = _payload)
+				{
+
+					fixed (byte* dest = _requestMsg.Data)
+					{   //4 bytes = commandtype
+						//4 bytes = length
+						//N-bytes = payload
+						byte* tPtr = dest;
+						*((Int32*)tPtr) = 9;
+						tPtr += 4;
+						*(Int32*)tPtr = _payloadLength; //init/modify
+						tPtr += 4;
+						Buffer.MemoryCopy(src, tPtr, _requestMsg.Data.Length, _payloadLength);
+					}
+
+				}
+			}
+
+			_requestSocket.TrySend(ref _requestMsg, SendTimeout, false);
+
+
+			_requestMsg.Close();
+			_requestMsg.InitEmpty();
+
+			//recieve the empty frame
+			while (!_requestSocket.TryReceive(ref _requestMsg, RecieveTimeout))
+			{
+				//wait for the message to come back
+			}
+			_requestMsg.Close();
+			_requestMsg.InitEmpty();
+			while (!_requestSocket.TryReceive(ref _requestMsg, RecieveTimeout))
+			{
+				//wait for the message to come back
+			}
+
+			//data is back, lets parse out the data
+
+			string mqReturnValue = System.Text.Encoding.Default.GetString(_requestMsg.Data, 0, _requestMsg.Data.Length);
+
+			_requestMsg.Close();
+
+			return mqReturnValue;
+		}
+
+		public int SpellDataGetLineCount(string query)
+		{
+			if (_requestMsg.IsInitialised)
+			{
+				_requestMsg.Close();
+			}
+			_requestMsg.InitEmpty();
+			//send empty frame
+			_requestSocket.TrySend(ref _requestMsg, SendTimeout, true);
+
+			_payloadLength = System.Text.Encoding.Default.GetBytes(query, 0, query.Length, _payload, 0);
+
+			_requestMsg.Close();
+
+			//include command+ length in payload
+			_requestMsg.InitPool(_payloadLength + 8);
+
+
+
+			unsafe
+			{
+				fixed (byte* src = _payload)
+				{
+
+					fixed (byte* dest = _requestMsg.Data)
+					{   //4 bytes = commandtype
+						//4 bytes = length
+						//N-bytes = payload
+						byte* tPtr = dest;
+						*((Int32*)tPtr) = 8;
+						tPtr += 4;
+						*(Int32*)tPtr = _payloadLength; //init/modify
+						tPtr += 4;
+						Buffer.MemoryCopy(src, tPtr, _requestMsg.Data.Length, _payloadLength);
+					}
+
+				}
+			}
+
+			_requestSocket.TrySend(ref _requestMsg, SendTimeout, false);
+
+
+			_requestMsg.Close();
+			_requestMsg.InitEmpty();
+
+			//recieve the empty frame
+			while (!_requestSocket.TryReceive(ref _requestMsg, RecieveTimeout))
+			{
+				//wait for the message to come back
+			}
+			_requestMsg.Close();
+			_requestMsg.InitEmpty();
+			while (!_requestSocket.TryReceive(ref _requestMsg, RecieveTimeout))
+			{
+				//wait for the message to come back
+			}
+
+			//data is back, lets parse out the data
+
+			string mqReturnValue = System.Text.Encoding.Default.GetString(_requestMsg.Data, 0, _requestMsg.Data.Length);
+
+			_requestMsg.Close();
+
+			return Int32.Parse(mqReturnValue);
+		}
+	}
 
 }
